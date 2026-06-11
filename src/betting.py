@@ -382,46 +382,46 @@ def generate_sample_odds():
 # MAIN
 # ============================================================
 
-if __name__ == "__main__":
+def main():
+    """Entry point for wc-betting command."""
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
 
         if cmd == "--all":
-            # Bulk analysis
             analyze_all()
-
         elif cmd == "--sample":
-            # Generate sample odds
             generate_sample_odds()
             print("\n然后运行: python src/betting.py --all")
-
         elif cmd == "--match" and len(sys.argv) >= 7:
-            # Quick single match: home away odds_h odds_d odds_a
             home = sys.argv[2]
             away = sys.argv[3]
             oh = float(sys.argv[4])
             od = float(sys.argv[5])
             oa = float(sys.argv[6])
             quick_check(home, away, oh, od, oa)
-
         else:
-            print("用法:")
-            print("  python src/betting.py --all                  批量分析(需odds.csv)")
-            print("  python src/betting.py --sample               生成示例赔率")
-            print("  python src/betting.py --match 法国 巴西 2.50 3.20 2.80  单场分析")
+            _print_usage()
     else:
-        # Default: show usage and generate sample
         print("=" * 65)
         print("  2026 世界杯博彩分析工具")
         print("=" * 65)
         print()
-        print("  用法:")
-        print("    python src/betting.py --sample              生成示例赔率文件")
-        print("    python src/betting.py --all                 批量分析(需先准备odds.csv)")
-        print("    python src/betting.py --match <主队> <客队> <主胜赔率> <平局赔率> <客胜赔率>")
-        print()
-        print("  示例:")
-        print("    python src/betting.py --match 法国 巴西 2.50 3.20 2.80")
+        _print_usage()
+        generate_sample_odds()
+
+
+def _print_usage():
+    print("  用法:")
+    print("    python src/betting.py --sample              生成示例赔率文件")
+    print("    python src/betting.py --all                 批量分析(需先准备odds.csv)")
+    print("    python src/betting.py --match <主队> <客队> <主胜赔率> <平局赔率> <客胜赔率>")
+    print()
+    print("  示例:")
+    print("    python src/betting.py --match 法国 巴西 2.50 3.20 2.80")
+
+
+if __name__ == "__main__":
+    main()
         print()
         # Auto-generate sample
         generate_sample_odds()

@@ -431,11 +431,10 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
     return probs, winner
 
 
-if __name__ == "__main__":
-    # Predict all WC 2026 matches
+def main():
+    """Entry point for wc-predict command."""
     results = predict_all_wc_matches()
 
-    # Example custom match predictions
     if results is not None:
         print("\n\n" + "=" * 60)
         print("CUSTOM MATCH PREDICTIONS")
@@ -443,3 +442,7 @@ if __name__ == "__main__":
         predict_custom_match("France", "Brazil")
         predict_custom_match("Argentina", "Spain")
         predict_custom_match("England", "Germany")
+
+
+if __name__ == "__main__":
+    main()

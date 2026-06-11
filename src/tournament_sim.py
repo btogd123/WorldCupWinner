@@ -422,5 +422,10 @@ def simulate_tournament():
     return results
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for wc-simulate command."""
     simulate_tournament()
+
+
+if __name__ == "__main__":
+    main()
