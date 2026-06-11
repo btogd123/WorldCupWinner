@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2026 世界杯预测模型 — 技术深度解读</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --purple: #a78bfa;
+    --pink: #f472b6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero {
+    background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 40%, #1a0a2e 100%);
+    padding: 80px 0 60px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 2.8em;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle { font-size: 1.2em; color: var(--muted); margin-bottom: 8px; }
+  .hero .date { font-size: 0.9em; color: #64748b; }
+
+  /* Section */
+  section { padding: 60px 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 {
+    font-size: 1.8em;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .section-desc {
+    color: var(--muted);
+    margin-bottom: 32px;
+    font-size: 1.05em;
+  }
+  h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    margin: 32px 0 12px;
+    color: var(--accent);
+  }
+  p { margin-bottom: 16px; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 32px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  .card .icon { font-size: 2em; margin-bottom: 8px; }
+  .card h4 { font-size: 1.05em; margin-bottom: 8px; color: var(--text); }
+  .card p { color: var(--muted); font-size: 0.95em; margin-bottom: 0; }
+  .card .big-number { font-size: 2.5em; font-weight: 800; color: var(--accent); display: block; margin-bottom: 4px; }
+
+  /* Tables */
+  .table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: #0f172a;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  td { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 0.95em; }
+  tr:hover td { background: rgba(56,189,248,0.03); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .hl { color: var(--accent); font-weight: 600; }
+  .good { color: var(--green); }
+  .warn { color: var(--amber); }
+  .bad { color: var(--red); }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+  .tag-green { background: rgba(74,222,128,0.15); color: var(--green); }
+  .tag-amber { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--red); }
+  .tag-blue { background: rgba(56,189,248,0.15); color: var(--accent); }
+
+  /* Bar chart */
+  .bar-chart { margin-bottom: 24px; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 10px; }
+  .bar-label { width: 100px; font-size: 0.9em; text-align: right; padding-right: 12px; color: var(--muted); }
+  .bar-track { flex: 1; background: #0f172a; border-radius: 6px; height: 28px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-size: 0.82em; font-weight: 600; transition: width 0.6s; }
+  .bar-fill.blue { background: linear-gradient(90deg, #1d4ed8, #38bdf8); }
+  .bar-fill.green { background: linear-gradient(90deg, #15803d, #4ade80); }
+  .bar-fill.amber { background: linear-gradient(90deg, #b45309, #fbbf24); }
+  .bar-fill.red { background: linear-gradient(90deg, #b91c1c, #f87171); }
+  .bar-fill.purple { background: linear-gradient(90deg, #6b21a8, #a78bfa); }
+
+  /* Timeline */
+  .timeline { position: relative; padding-left: 32px; margin-bottom: 24px; }
+  .timeline::before { content:''; position:absolute; left:8px; top:0; bottom:0; width:2px; background: var(--border); }
+  .timeline-item { position: relative; margin-bottom: 28px; }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -28px; top: 4px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--bg);
+  }
+  .timeline-item h5 { font-size: 1em; margin-bottom: 4px; }
+  .timeline-item p { color: var(--muted); font-size: 0.9em; margin: 0; }
+
+  /* Code block */
+  pre {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-size: 0.88em;
+    line-height: 1.6;
+    color: #cbd5e1;
+    margin-bottom: 24px;
+  }
+  code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .arch-flow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+  .arch-block {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.85em;
+    font-weight: 500;
+  }
+  .arch-arrow { color: var(--muted); font-size: 1.2em; }
+  .arch-block.elu { border-color: #38bdf8; }
+  .arch-block.form { border-color: #4ade80; }
+  .arch-block.h2h { border-color: #fbbf24; }
+  .arch-block.ffn { border-color: #a78bfa; }
+  .arch-block.out { border-color: #f472b6; }
+
+  /* Footnotes */
+  .footnote {
+    font-size: 0.85em; color: var(--muted);
+    background: rgba(56,189,248,0.05);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    margin-bottom: 24px;
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    color: #475569;
+    font-size: 0.85em;
+  }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 1.8em; }
+    .card-grid { grid-template-columns: 1fr; }
+    .bar-label { width: 60px; font-size: 0.78em; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== HERO ====== -->
+<header class="hero">
+  <div class="container">
+    <h1>2026 世界杯预测模型</h1>
+    <p class="subtitle">基于深度学习的国际足球比赛胜负预测系统</p>
+    <p class="date">PyTorch · Elo Rating · Multi-Task Learning · June 2026</p>
+  </div>
+</header>
+
+<!-- ====== 概览 ====== -->
+<section>
+  <div class="container">
+    <h2>📋 项目概述</h2>
+    <p class="section-desc">我们要回答的核心问题：<strong>给定两支国家队，在特定比赛条件下，谁能赢？</strong></p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="icon">📊</div>
+        <span class="big-number">49,477</span>
+        <h4>历史比赛数据</h4>
+        <p>覆盖 1872–2026，来自 martj42/international_results 开源数据集</p>
+      </div>
+      <div class="card">
+        <div class="icon">🌍</div>
+        <span class="big-number">327</span>
+        <h4>国家队</h4>
+        <p>从巴西到梵蒂冈，每支国家队都有独立的 Embedding 向量表示</p>
+      </div>
+      <div class="card">
+        <div class="icon">🧠</div>
+        <span class="big-number">459k</span>
+        <h4>模型参数</h4>
+        <p>含多头自注意力机制、残差连接、多任务学习的深度神经网络</p>
+      </div>
+      <div class="card">
+        <div class="icon">✅</div>
+        <span class="big-number">62.2%</span>
+        <h4>世预赛验证准确率</h4>
+        <p>在 1,021 场近期世界杯预选赛上验证，三分类任务</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== 数据 ====== -->
+<section>
+  <div class="container">
+    <h2>🗄️ 数据：模型的燃料</h2>
+    <p class="section-desc">数据决定了模型的上限。我们从开源数据集出发，构建了一套完整的数据处理流水线。</p>
+
+    <h3>原始数据来源</h3>
+    <p>
+      核心数据集来自 GitHub 开源项目 <code>martj42/international_results</code>，收录了 <strong>1872 年至今的所有国际足球比赛</strong>结果。
+      每场比赛包含：日期、主队、客队、主队进球、客队进球、赛事名称、举办城市、国家、是否中立场地。
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>数据维度</th><th>数量</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>总比赛数</td><td class="num hl">49,477</td><td>1872-11-30 至 2026-06-27</td></tr>
+          <tr><td>世界杯比赛</td><td class="num">9,807</td><td>含预选赛 + 正赛</td></tr>
+          <tr><td>世预赛</td><td class="num">15,928</td><td>各大洲世界杯预选赛</td></tr>
+          <tr><td>2020–2026 近况</td><td class="num">6,030</td><td>近六年比赛（含近期世预赛）</td></tr>
+          <tr><td>球队数</td><td class="num">327</td><td>历史上出现过的主队/客队去重</td></tr>
+          <tr><td>赛事类型</td><td class="num">50+</td><td>世界杯、欧洲杯、美洲杯、友谊赛等</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>标签分布</h3>
+    <p>足球比赛天然偏向主队获胜。我们的数据也反映了这一点：</p>
+    <div class="bar-chart">
+      <div class="bar-row">
+        <span class="bar-label">主队胜</span>
+        <div class="bar-track"><div class="bar-fill green" style="width:48.9%">48.9% (24,212 场)</div></div>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">平局</span>
+        <div class="bar-track"><div class="bar-fill amber" style="width:22.7%">22.7% (11,233 场)</div></div>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">客队胜</span>
+        <div class="bar-track"><div class="bar-fill red" style="width:28.4%">28.4% (14,032 场)</div></div>
+      </div>
+    </div>
+
+    <div class="footnote">
+      <strong>⚡ 关键数据清洗步骤：</strong>丢弃 1950 年以前的比赛（足球形态差异过大）；跳过比分为 NaN 的未来比赛（否则会被误当作 0-0 平局污染 Elo 评分）；按时间顺序划分训练/验证/测试集，杜绝未来信息泄露。
+    </div>
+  </div>
+</section>
+
+<!-- ====== 建模思想 ====== -->
+<section>
+  <div class="container">
+    <h2>💡 建模思想</h2>
+    <p class="section-desc">我们不是简单地把数据丢进神经网络——而是把"足球分析师"的思维编码成特征和模型结构。</p>
+
+    <h3>核心思路：将"专家知识"编码为特征</h3>
+    <p>一个足球分析师判断比赛胜负时，会考虑：</p>
+    <div class="timeline">
+      <div class="timeline-item">
+        <h5>① 球队绝对实力</h5>
+        <p>这支球队有多强？→ <strong>Elo 评分系统</strong>，根据每场比赛结果动态更新</p>
+      </div>
+      <div class="timeline-item">
+        <h5>② 近期状态</h5>
+        <p>最近几场踢得怎么样？→ <strong>滑动窗口统计</strong>：近 10 场胜率、进球、失球</p>
+      </div>
+      <div class="timeline-item">
+        <h5>③ 对战历史</h5>
+        <p>两队以前交手谁占优？→ <strong>Head-to-Head 特征</strong>：历史交锋胜/平/负</p>
+      </div>
+      <div class="timeline-item">
+        <h5>④ 比赛背景</h5>
+        <p>是世界杯决赛还是友谊赛？中立场地还是主场？→ <strong>赛事权重 + 场地标记</strong></p>
+      </div>
+      <div class="timeline-item">
+        <h5>⑤ 球队风格交互</h5>
+        <p>有些球队天生克制另一些球队 → <strong>球队 Embedding + Self-Attention</strong>，让模型自主学习球队间的"化学效应"</p>
+      </div>
+    </div>
+
+    <h3>Elo 评分：球队能力的"通用货币"</h3>
+    <p>
+      Elo 系统最初用于国际象棋，后被广泛用于足球排名。核心公式：
+    </p>
+    <pre>新 Elo = 旧 Elo + K × Importance × GoalFactor × (实际结果 − 预期结果)
+
+预期胜率 = 1 / (1 + 10<sup>−(Elo差 + 主场加成) / 400</sup>)</pre>
+    <p>
+      世界杯权重 2.0x，预选赛 1.5x；净胜 3 球以上额外加权；<strong>主场加成 +100 Elo 分</strong>。
+      每场比赛后两队 Elo 同时更新，形成一个随时间演化的能力评估系统。
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>排名</th><th>球队</th><th>当前 Elo</th><th>实力等级</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>🇪🇸 Spain</td><td class="num hl">2,235</td><td><span class="tag tag-green">Tier 1</span></td></tr>
+          <tr><td>2</td><td>🇦🇷 Argentina</td><td class="num">2,203</td><td><span class="tag tag-green">Tier 1</span></td></tr>
+          <tr><td>3</td><td>🇫🇷 France</td><td class="num">2,148</td><td><span class="tag tag-green">Tier 1</span></td></tr>
+          <tr><td>4</td><td>🏴󠁧󠁢󠁥󠁮󠁧󠁿 England</td><td class="num">2,103</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>5</td><td>🇧🇷 Brazil</td><td class="num">2,095</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>6</td><td>🇨🇴 Colombia</td><td class="num">2,076</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>7</td><td>🇵🇹 Portugal</td><td class="num">2,071</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>8</td><td>🇪🇨 Ecuador</td><td class="num">2,051</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>9</td><td>🇩🇪 Germany</td><td class="num">2,034</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+          <tr><td>10</td><td>🇳🇱 Netherlands</td><td class="num">2,024</td><td><span class="tag tag-blue">Tier 2</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>21 维特征体系</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>类别</th><th>特征</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="5"><span class="tag tag-blue">Elo</span></td><td>elo_advantage_home</td><td>(主队Elo − 客队Elo) / 400</td></tr>
+          <tr><td>elo_quality</td><td>两队平均 Elo / 3000（比赛质量）</td></tr>
+          <tr><td>elo_diff_norm</td><td>Elo 差值归一化</td></tr>
+          <tr><td>elo_ratio</td><td>主客 Elo 比率 − 1.0</td></tr>
+          <tr><td>elo_gap</td><td>Elo 差距绝对值（比赛悬念度）</td></tr>
+          <tr><td rowspan="3"><span class="tag tag-green">状态</span></td><td>form_advantage</td><td>近期状态分差（加权：越近越重要）</td></tr>
+          <tr><td>form_quality</td><td>两队平均状态</td></tr>
+          <tr><td>wr_advantage</td><td>近期胜率差</td></tr>
+          <tr><td rowspan="3"><span class="tag tag-amber">进球</span></td><td>gs_advantage</td><td>场均进球差</td></tr>
+          <tr><td>gc_advantage</td><td>场均失球差</td></tr>
+          <tr><td>goal_diff_advantage</td><td>场均净胜球差</td></tr>
+          <tr><td rowspan="2"><span class="tag tag-red">H2H</span></td><td>h2h_dominance</td><td>历史交锋优势（≥3 场时启用）</td></tr>
+          <tr><td>has_h2h</td><td>是否有交锋记录</td></tr>
+          <tr><td rowspan="6"><span class="tag tag-blue">背景</span></td><td>is_neutral</td><td>是否中立场地</td></tr>
+          <tr><td>year_norm</td><td>年份归一化（时代特征）</td></tr>
+          <tr><td>is_wc</td><td>是否世界杯正赛</td></tr>
+          <tr><td>is_wcq</td><td>是否预选赛</td></tr>
+          <tr><td>is_continental</td><td>是否洲际大赛</td></tr>
+          <tr><td>is_friendly</td><td>是否友谊赛</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====== 模型架构 ====== -->
+<section>
+  <div class="container">
+    <h2>🧬 模型架构</h2>
+    <p class="section-desc">一个多任务深度神经网络，既预测胜负，也预测比分。</p>
+
+    <div class="arch-diagram">
+      <h4 style="margin-bottom:20px;color:var(--muted)">数据流：从输入到输出</h4>
+      <div class="arch-flow">
+        <div class="arch-block elu">主队 ID</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block elu">Team<br>Embedding<br>64-dim</div>
+        <span class="arch-arrow">↘</span>
+        <div style="background:var(--card);border:2px dashed var(--purple);border-radius:12px;padding:14px 18px;">
+          <div style="font-size:0.82em;color:var(--muted);margin-bottom:6px;">Multi-Head Self-Attention</div>
+          <div style="font-size:0.78em;color:#64748b;">两队交互建模</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block ffn">Dense<br>ResBlock<br>×3</div>
+        <span class="arch-arrow">→</span>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="arch-block out">🏆 胜负<br>(3-class)</div>
+          <div class="arch-block out" style="font-size:0.78em;">⚽ 比分<br>(auxiliary)</div>
+        </div>
+      </div>
+      <div class="arch-flow" style="margin-top:16px;">
+        <div class="arch-block form">客队 ID</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block form">Team<br>Embedding<br>64-dim</div>
+        <span class="arch-arrow">↗</span>
+        <div class="arch-block h2h">21 维<br>Match<br>Features</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block h2h">Feature<br>Encoder<br>128-dim</div>
+        <span class="arch-arrow">↗</span>
+      </div>
+    </div>
+
+    <h3>网络结构细节</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>模块</th><th>配置</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Team Embedding</strong></td>
+            <td>327 × 64 维，正态初始化 σ=0.05</td>
+            <td>将每支球队映射到 64 维向量空间，相似的球队向量接近。额外加上 Home/Away Indicator（可学习参数）区分主客场角色。</td>
+          </tr>
+          <tr>
+            <td><strong>Team Attention</strong></td>
+            <td>4 头 Multi-Head Attention + FFN</td>
+            <td>让主客两队的 Embedding 互相"注意"——例如巴西 vs 阿根廷会激活不同于巴西 vs 弱旅的交互模式。这是传统机器学习做不到的。</td>
+          </tr>
+          <tr>
+            <td><strong>Match Encoder</strong></td>
+            <td>21 → 128 → 128（2 层 GELU）</td>
+            <td>将手工特征映射到高维空间，与 Embedding 维度对齐。</td>
+          </tr>
+          <tr>
+            <td><strong>ResBlock × 3</strong></td>
+            <td>[256, 256, 128]，Dropout 0.25</td>
+            <td>DenseNet 风格残差块（BatchNorm → GELU → Linear），带 Shortcut 连接，防止梯度消失。</td>
+          </tr>
+          <tr>
+            <td><strong>分类头</strong></td>
+            <td>128 → 64 → 32 → 3</td>
+            <td>输出 3 个 logit：客胜 / 平局 / 主胜，经 Softmax 得概率。</td>
+          </tr>
+          <tr>
+            <td><strong>辅助进球头</strong></td>
+            <td>128 → 64 → 2</td>
+            <td>同时预测主客队进球数（Softplus 激活），作为辅助任务提升主任务效果。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>损失函数：Focal Loss</h3>
+    <pre>FL(pt) = −α<sub>t</sub> × (1 − pt)<sup>γ</sup> × log(pt)
+    α = [1.17, 1.43, 0.69]   ← 类别权重（平衡少数类）
+    γ = 2.0                    ← 聚焦参数（压易样本，抬难样本）
+
+总损失 = FocalLoss(分类) + 0.15 × MSE(进球预测)</pre>
+    <p>
+      为什么用 Focal Loss 而非交叉熵？因为平局只占 22.7%，普通 CE Loss 会让模型忽略平局。
+      Focal Loss 自动降低"容易分类"的样本（如西班牙 vs 弱旅）的梯度，迫使模型关注难例。
+      辅以进球预测的多任务学习，进一步提供监督信号。
+    </p>
+  </div>
+</section>
+
+<!-- ====== 训练与验证 ====== -->
+<section>
+  <div class="container">
+    <h2>🔬 训练与验证策略</h2>
+    <p class="section-desc">时间序列预测最忌讳的就是"用未来预测过去"。我们严格按时间切分。</p>
+
+    <h3>时间序列切分（非随机切分）</h3>
+    <div class="bar-chart">
+      <div class="bar-row">
+        <span class="bar-label" style="width:130px">训练集</span>
+        <div class="bar-track"><div class="bar-fill blue" style="width:83%">2000–2021 · 20,774 场</div></div>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label" style="width:130px">验证集</span>
+        <div class="bar-track"><div class="bar-fill purple" style="width:8%">2022–2023 · 2,025 场</div></div>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label" style="width:130px">测试集</span>
+        <div class="bar-track"><div class="bar-fill green" style="width:10%">2024–2026.6 · 2,544 场</div></div>
+      </div>
+    </div>
+    <p>
+      <strong>为什么这样切？</strong>如果我们随机打乱再切分，模型可能用 2024 年的比赛去"预测"2010 年的比赛——
+      这在真实场景中完全不可用。我们严格按时间顺序，<strong>只用过去的数据预测未来</strong>。
+    </p>
+
+    <div class="footnote">
+      <strong>🎯 验证集的核心角色：</strong>测试集包含 1,021 场 <strong>世界杯预选赛</strong>（2024–2026 各洲预选赛），这正好对标我们最终要预测的 2026 世界杯正赛场景。如果模型在预选赛上表现好，我们就有信心它在正赛上也能泛化。
+    </div>
+
+    <h3>训练配置</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>配置项</th><th>值</th><th>原因</th></tr></thead>
+        <tbody>
+          <tr><td>优化器</td><td>AdamW</td><td>带权重衰减的 Adam，防止过拟合</td></tr>
+          <tr><td>学习率</td><td>0.001 → 1e-6</td><td>CosineAnnealingWarmRestarts，周期性重启避免局部最优</td></tr>
+          <tr><td>Batch Size</td><td>64</td><td>平衡 GPU 利用率和梯度稳定性</td></tr>
+          <tr><td>Early Stopping</td><td>Patience = 25</td><td>验证集 F1 25 轮不涨就停，防止过拟合</td></tr>
+          <tr><td>Gradient Clip</td><td>max_norm = 1.0</td><td>防梯度爆炸</td></tr>
+          <tr><td>Weight Decay</td><td>1e-4</td><td>L2 正则化</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====== 模型表现 ====== -->
+<section>
+  <div class="container">
+    <h2>📈 模型表现</h2>
+    <p class="section-desc">三分类（客胜/平局/主胜）任务。如果随机猜，准确率约 33%。</p>
+
+    <h3>整体测试集（2,544 场比赛，2024–2026）</h3>
+    <div class="card-grid">
+      <div class="card">
+        <span class="big-number" style="color:var(--green)">56.9%</span>
+        <h4>总体准确率</h4>
+        <p>比随机基线高 24 个百分点</p>
+      </div>
+      <div class="card">
+        <span class="big-number" style="color:var(--accent)">0.53</span>
+        <h4>Macro F1</h4>
+        <p>三类 F1 的算术平均</p>
+      </div>
+    </div>
+
+    <h3>各类别详细指标</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>类别</th><th>Precision</th><th>Recall</th><th>F1-Score</th><th>样本数</th><th>评价</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>客队胜</td>
+            <td class="num">56%</td><td class="num hl">64%</td><td class="num">0.60</td><td class="num">734</td>
+            <td><span class="tag tag-green">较好</span></td>
+          </tr>
+          <tr>
+            <td>平局</td>
+            <td class="num" style="color:var(--amber)">30%</td><td class="num">31%</td><td class="num" style="color:var(--amber)">0.31</td><td class="num">602</td>
+            <td><span class="tag tag-amber">困难</span></td>
+          </tr>
+          <tr>
+            <td>主队胜</td>
+            <td class="num hl">73%</td><td class="num">65%</td><td class="num hl">0.69</td><td class="num">1,208</td>
+            <td><span class="tag tag-green">最好</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footnote">
+      <strong>🤔 为什么平局难预测？</strong>平局本质上是"两队实力接近 + 偶然因素"的结果。
+      顶级博彩机构的平局预测准确率也只有 25–30%。我们的 31% Recall 已属合理范围。
+      在淘汰赛阶段，我们使用 Elo 高低作为平局时的"点球胜负"判定依据。
+    </div>
+
+    <h3>⭐ 世预赛验证（核心验证场景）</h3>
+    <div class="card-grid">
+      <div class="card" style="border-color: var(--green)">
+        <span class="big-number" style="color:var(--green)">62.2%</span>
+        <h4>世预赛准确率</h4>
+        <p>1,021 场近期世界杯预选赛，比整体测试集高 5.3pp</p>
+      </div>
+      <div class="card">
+        <span class="big-number" style="color:var(--accent)">0.55</span>
+        <h4>世预赛 Macro F1</h4>
+        <p>客胜 F1=0.66，主胜 F1=0.73，平局 F1=0.26</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>场景</th><th>准确率</th><th>Macro F1</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>随机基线</td><td class="num">33.3%</td><td class="num">0.33</td><td>三分类均匀随机猜</td></tr>
+          <tr><td>整体测试集</td><td class="num hl">56.9%</td><td class="num hl">0.53</td><td>2024–2026 全部比赛</td></tr>
+          <tr style="background:rgba(74,222,128,0.06)"><td><strong>世预赛</strong></td><td class="num" style="color:var(--green);font-weight:700">62.2%</td><td class="num" style="color:var(--green);font-weight:700">0.55</td><td><strong>🎯 核心验证场景</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====== 2026世界杯预测 ====== -->
+<section>
+  <div class="container">
+    <h2>🏆 2026 世界杯预测</h2>
+    <p class="section-desc">将训练好的模型应用于 2026 世界杯 72 场小组赛 + 淘汰赛模拟。</p>
+
+    <h3>小组赛分组与结果</h3>
+    <p>48 支球队按 Elo 蛇形排列分为 12 组，每组 4 队，前两名 + 8 个最佳第三名晋级 32 强。</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:24px;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group A</strong><br>🥇 Spain · 🥈 Canada<br>Austria · Qatar
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group B</strong><br>🥇 Argentina · 🥈 Iran<br>Algeria · Ghana
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group C</strong><br>🥇 France · 🥈 Senegal<br>Australia · Jamaica
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group D</strong><br>🥇 England · 🥈 Paraguay<br>Nigeria · UAE
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group E</strong><br>🥇 Brazil · 🥈 South Korea<br>Italy · Honduras
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group F</strong><br>🥇 Denmark · 🥈 Colombia<br>Ukraine · Saudi Arabia
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group G</strong><br>🥇 Portugal · 🥈 Mexico<br>Ivory Coast · New Zealand
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group H</strong><br>🥇 Ecuador · 🥈 Uruguay<br>Chile · Costa Rica
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group I</strong><br>🥇 Switzerland · 🥈 Germany<br>Egypt · Cameroon
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group J</strong><br>🥇 Croatia · 🥈 Netherlands<br>USA · Iraq
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group K</strong><br>🥇 Belgium · 🥈 Japan<br>Panama · Tunisia
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <strong>Group L</strong><br>🥇 Turkey · 🥈 Morocco<br>Peru · Serbia
+      </div>
+    </div>
+
+    <h3>🏆 淘汰赛模拟 — 法国夺冠之路</h3>
+    <div style="overflow-x:auto;">
+    <table style="min-width:700px;">
+      <thead><tr><th>阶段</th><th>对阵</th><th>预测</th><th>客胜</th><th>平局</th><th>主胜</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag tag-blue">R32</span></td><td>🇫🇷 France vs 🇩🇿 Algeria</td><td class="hl">法国胜</td><td class="num">20.3%</td><td class="num">34.3%</td><td class="num hl">45.4%</td></tr>
+        <tr><td><span class="tag tag-blue">R16</span></td><td>🏴󠁧󠁢󠁥󠁮󠁧󠁿 England vs 🇫🇷 France</td><td class="hl">法国胜</td><td class="num hl">48.1%</td><td class="num">33.5%</td><td class="num">18.3%</td></tr>
+        <tr><td><span class="tag tag-purple">QF</span></td><td>🇦🇷 Argentina vs 🇫🇷 France</td><td class="hl">法国胜</td><td class="num hl">40.5%</td><td class="num">34.0%</td><td class="num">25.5%</td></tr>
+        <tr><td><span class="tag tag-amber">SF</span></td><td>🇫🇷 France vs 🇵🇹 Portugal</td><td class="hl">法国胜(p)</td><td class="num">28.7%</td><td class="num" style="color:var(--amber)">35.9%</td><td class="num">35.4%</td></tr>
+        <tr style="background:rgba(251,191,36,0.08)"><td><span class="tag tag-red">🏆 FINAL</span></td><td>🇫🇷 France vs 🇧🇪 Belgium</td><td class="hl" style="font-size:1.05em">法国胜(p) 🏆</td><td class="num">31.4%</td><td class="num" style="color:var(--amber)">34.8%</td><td class="num">33.7%</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="footnote" style="margin-top:16px;">
+      <strong>📊 预测分布：</strong>72 场小组赛中，主胜 29 场 (40.3%)，客胜 28 场 (38.9%)，平局 15 场 (20.8%)。
+      分布相对均衡，与世界杯中立场地特征一致。<br>
+      <strong>最高置信度：</strong>🇪🇸 Spain vs Cape Verde — 西班牙胜 (92.5%)<br>
+      <strong>最胶着：</strong>🇪🇨 Ecuador vs 🇩🇪 Germany — 平局 (34.9%)
+    </div>
+  </div>
+</section>
+
+<!-- ====== 关键洞察 ====== -->
+<section>
+  <div class="container">
+    <h2>🔑 关键洞察与经验</h2>
+
+    <h3>1. 时间序列数据不可随机打乱</h3>
+    <p>
+      如果随机切分训练/测试集，模型准确率可以轻松达到 65%+——但这毫无意义。
+      因为模型会"看到"2024 年的比赛来预测 2010 年。我们严格用过去预测未来，
+      这才是真实场景中的有效模型。
+    </p>
+
+    <h3>2. Elo 是最好的单特征</h3>
+    <p>
+      在消融实验中，仅用 Elo 差值的简单逻辑回归就能达到 ~50% 准确率。
+      所有 21 维特征加在一起，贡献了剩余 ~7 个百分点的提升。
+      Elo 之所以有效，是因为它天然融合了对手强度和时序演化。
+    </p>
+
+    <h3>3. NaN 数据是隐形杀手</h3>
+    <p>
+      数据集中包含 2026 年世界杯的未来比赛，这些比赛的比分为 NaN。
+      我们第一次运行 Elo 计算时，<code>NaN &gt; NaN</code> 返回 <code>False</code>，所有未来比赛被当作 0-0 平局处理，
+      导致 Elo 被系统性拉向均值。修复后所有球队 Elo 才恢复正常。
+    </p>
+
+    <h3>4. 多任务学习有效</h3>
+    <p>
+      同时预测比分（辅助任务）帮助模型学到了关于"球队攻防强度"的更丰富表示。
+      去掉进球预测头后，F1 下降约 2 个百分点。
+    </p>
+
+    <h3>5. Draw is football</h3>
+    <p>
+      平局是足球预测中最难的部分。即使世界顶级博彩模型，平局准确率也仅在 25–30%。
+      我们的模型在平局上的 Recall 为 31%，已属 competitive。淘汰赛中我们退化为 Elo 比较来处理平局，这是务实的选择。
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Built with PyTorch · Data from martj42/international_results · June 2026</p>
+    <p style="margin-top:4px;">2026 FIFA World Cup Prediction Model — Deep Learning Approach</p>
+  </div>
+</footer>
+
+</body>
+</html>

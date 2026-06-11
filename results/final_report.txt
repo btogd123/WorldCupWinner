@@ -1,0 +1,121 @@
+======================================================================
+2026 FIFA WORLD CUP PREDICTION MODEL - FINAL REPORT
+======================================================================
+Generated: 2026-06-11 21:16:51
+
+----------------------------------------------------------------------
+1. MODEL ARCHITECTURE
+----------------------------------------------------------------------
+Type: Deep Neural Network with Attention (PyTorch)
+Architecture:
+  - Team Embeddings (64-dim) with home/away indicators
+  - Multi-head Self-Attention (4 heads) for team interactions
+  - Match Feature Encoder (128-dim, 2-layer)
+  - 3 Dense Residual Blocks [256, 256, 128]
+  - Multi-task Learning: Classification + Goal Prediction
+  - Focal Loss with class weights for imbalance handling
+  - Total Parameters: 459,286
+
+----------------------------------------------------------------------
+2. FEATURE ENGINEERING (21 features)
+----------------------------------------------------------------------
+Elo-based (5):
+  - elo_advantage_home, elo_quality, elo_diff_norm, elo_ratio, elo_gap
+Form-based (3):
+  - form_advantage, form_quality, wr_advantage
+Goal-based (3):
+  - gs_advantage, gc_advantage, goal_diff_advantage
+Strength (2):
+  - strength_advantage, match_quality
+H2H (2):
+  - h2h_dominance, has_h2h
+Context (6):
+  - is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly
+
+----------------------------------------------------------------------
+3. TRAINING DETAILS
+----------------------------------------------------------------------
+Training Data: 20,774 matches (2000-2021)
+Validation Data: 2,025 matches (2022-2023)
+Test Data: 2,544 matches (2024-2026)
+  - Including 1,021 World Cup Qualifiers
+Optimizer: AdamW (lr=0.001, weight_decay=1e-4)
+Scheduler: CosineAnnealingWarmRestarts
+Early Stopping: patience=25
+
+----------------------------------------------------------------------
+4. MODEL PERFORMANCE
+----------------------------------------------------------------------
+Test Set (2,544 matches, 2024-2026):
+  Accuracy: 56.9%
+  Macro F1: 53.2%
+
+  Away Win: Precision=56%, Recall=64%, F1=60%
+  Draw:     Precision=30%, Recall=31%, F1=31%
+  Home Win: Precision=73%, Recall=65%, F1=69%
+
+World Cup Qualifiers (1,021 matches):
+  Accuracy: 62.2%
+  Macro F1: 55.3%
+
+----------------------------------------------------------------------
+5. TOP 20 TEAMS BY ELO RATING
+----------------------------------------------------------------------
+   1. Spain                  2234.8
+   2. Argentina              2203.4
+   3. France                 2148.4
+   4. England                2102.9
+   5. Brazil                 2094.8
+   6. Colombia               2076.1
+   7. Portugal               2071.4
+   8. Ecuador                2051.4
+   9. Germany                2033.6
+  10. Netherlands            2024.4
+  11. Norway                 2018.5
+  12. Japan                  2017.2
+  13. Morocco                2012.1
+  14. Turkey                 2011.5
+  15. Belgium                1996.3
+  16. Croatia                1986.1
+  17. Switzerland            1984.6
+  18. Uruguay                1974.4
+  19. Mexico                 1973.2
+  20. Denmark                1955.2
+
+----------------------------------------------------------------------
+6. WORLD CUP 2026 PREDICTIONS SUMMARY
+----------------------------------------------------------------------
+  Home Win: 29 (40.3%)
+  Away Win: 28 (38.9%)
+  Draw: 15 (20.8%)
+
+----------------------------------------------------------------------
+7. TOURNAMENT SIMULATION RESULTS
+----------------------------------------------------------------------
+Format: 12 groups of 4 → 32 teams to knockout
+Group Winners: Spain(A), Argentina(B), France(C), England(D),
+  Brazil(E), Denmark(F), Portugal(G), Ecuador(H),
+  Switzerland(I), Croatia(J), Belgium(K), Turkey(L)
+
+Knockout Path of Champion (France):
+  R32:  France 2-1 Algeria
+  R16:  France 2-1 England
+  QF:   France 2-1 Argentina
+  SF:   France 1-1 Portugal (France wins pens)
+  FINAL: France 1-1 Belgium (France wins pens)
+
+🏆 WORLD CUP 2026 CHAMPION: FRANCE 🏆
+
+----------------------------------------------------------------------
+8. LIMITATIONS & NOTES
+----------------------------------------------------------------------
+- Model trained on data through 2021, tested on 2024-2026
+- Draw prediction remains challenging (inherent in football)
+- Team roster changes, injuries not captured
+- Knockout matches resolved by Elo rating when predicted draw
+- Actual 2026 WC schedule and qualified teams may differ
+- Elo ratings based on historical match results only
+
+======================================================================
+END OF REPORT
+======================================================================
