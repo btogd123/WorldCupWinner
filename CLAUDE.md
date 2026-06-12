@@ -30,7 +30,8 @@ D:/WorldCupWinner/
 ├── uv.lock                            ← Locked deps
 ├── .gitignore
 ├── docs/
-│   └── literature_review.md           ← Survey of features/architectures to improve
+│   ├── literature_review.md           ← Survey of features/architectures to improve
+│   └── data_sources.md                ← All APIs and data sources (free + paid)
 ├── data/
 │   ├── results.csv                    ← Raw: 49,477 matches (martj42/international_results)
 │   ├── processed_matches.csv          ← After preprocessing: + Elo + form + H2H + features
@@ -163,6 +164,23 @@ The `home_elo` column in processed_matches.csv is the Elo BEFORE that match. The
 - File: `docs/literature_review.md`
 - Comprehensive survey of GitHub projects + 2024-2025 papers
 - Actionable improvement roadmap
+
+## Data Sources & APIs
+
+Full catalog in `docs/data_sources.md`. Quick reference:
+
+**Already using**: `martj42/international_results` (GitHub raw CSV, 49K matches)
+
+**Not yet tested (priority order):**
+1. `football-data.org` — free, 10 req/min, WC 2026 covered
+2. `API-Football` — free 100 req/day, odds + player stats
+3. `football-data.co.uk` — free odds bulk download, no API key needed
+4. `FBref` — xG, shot data (StatsBomb), free
+5. `penaltyblog` — all-in-one Python package (Dixon-Coles, Bayesian, scrapers)
+6. `StatsBomb Open Data` — event-level data, but latest WC is 2018 only
+7. `SofaScore` / `Transfermarkt` — player ratings / market values, need scraping
+
+**Paid options**: Sportmonks (€89/mo), Stats Perform/Opta (enterprise), API-Football Pro (~$120/yr)
 
 ## Improvement Roadmap (Next Steps)
 
