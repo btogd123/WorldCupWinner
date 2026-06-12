@@ -156,6 +156,8 @@ def calculate_recent_form(df, window=RECENT_FORM_WINDOW):
     away_goals_conceded = []
     home_win_rate = []
     away_win_rate = []
+    home_draw_rate = []
+    away_draw_rate = []
 
     # For each team, track their match history
     team_history = {}
@@ -180,11 +182,15 @@ def calculate_recent_form(df, window=RECENT_FORM_WINDOW):
         a_form = _calc_form_from_history(a_hist, window)
         a_gs, a_gc = _calc_goals_from_history(a_hist, window)
         a_wr = _calc_win_rate(a_hist, window)
+        h_dr = _calc_draw_rate(h_hist, window)
+        a_dr = _calc_draw_rate(a_hist, window)
 
         away_form.append(a_form)
         away_goals_scored.append(a_gs)
         away_goals_conceded.append(a_gc)
         away_win_rate.append(a_wr)
+        home_draw_rate.append(h_dr)
+        away_draw_rate.append(a_dr)
 
         # Update history after match
         if home_team not in team_history:
@@ -213,6 +219,8 @@ def calculate_recent_form(df, window=RECENT_FORM_WINDOW):
     matches["away_goals_conceded_avg"] = away_goals_conceded
     matches["home_win_rate"] = home_win_rate
     matches["away_win_rate"] = away_win_rate
+    matches["home_draw_rate"] = home_draw_rate
+    matches["away_draw_rate"] = away_draw_rate
 
     return matches
 
@@ -255,6 +263,17 @@ def _calc_win_rate(history, window):
         return 0.0
     wins = sum(1 for m in recent if m["goals_for"] > m["goals_against"])
     return wins / len(recent)
+
+
+def _calc_draw_rate(history, window):
+    """Calculate draw rate from history."""
+    if not history:
+        return 0.0
+    recent = history[-window:]
+    if not recent:
+        return 0.0
+    draws = sum(1 for m in recent if m["goals_for"] == m["goals_against"])
+    return draws / len(recent)
 
 
 def calculate_h2h_features(df):

@@ -65,6 +65,17 @@ def feature_engineering_v2(df):
     df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
     df["elo_gap"] = abs(df["elo_diff"]) / 400.0
 
+    # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
+    df["draw_rate_home"] = df["home_draw_rate"]
+    df["draw_rate_away"] = df["away_draw_rate"]
+    df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
+    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
+    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
+    df["low_scoring_tendency"] = (
+        (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
+        & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
+    ).astype(float)
+
     # H2H enhanced
     df["h2h_dominance"] = np.where(
         df["h2h_count"] >= 3,
@@ -122,6 +133,13 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False):
         # H2H
         "h2h_dominance",
         "has_h2h",
+        # Draw-specific
+        "draw_rate_home",
+        "draw_rate_away",
+        "both_draw_prone",
+        "strength_parity",
+        "defensive_similarity",
+        "low_scoring_tendency",
         # Context
         "is_neutral",
         "year_norm",
@@ -394,7 +412,7 @@ def train_improved():
     print("=" * 60)
 
     # Load best model
-    checkpoint = torch.load(MODEL_PATH)
+    checkpoint = torch.load(MODEL_PATH, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     test_loss, test_acc, test_f1, y_pred, y_true, y_prob = evaluate_improved(

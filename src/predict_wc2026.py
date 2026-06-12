@@ -24,7 +24,7 @@ def load_model_and_assets():
     """Load trained model and preprocessing assets."""
     print("Loading model and assets...")
 
-    checkpoint = torch.load(MODEL_PATH, map_location="cpu")
+    checkpoint = torch.load(MODEL_PATH, map_location="cpu", weights_only=False)
     team_encoder = checkpoint["team_encoder"]
     scaler = checkpoint["scaler"]
     feature_cols = checkpoint["feature_cols"]
@@ -84,6 +84,17 @@ def build_match_features(wc_df, team_encoder):
     # Match quality
     df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
     df["elo_gap"] = abs(df["elo_diff"]) / 400.0
+
+    # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
+    df["draw_rate_home"] = df["home_draw_rate"]
+    df["draw_rate_away"] = df["away_draw_rate"]
+    df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
+    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
+    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
+    df["low_scoring_tendency"] = (
+        (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
+        & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
+    ).astype(float)
 
     # H2H
     df["h2h_dominance"] = np.where(
@@ -384,6 +395,12 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "match_quality": (home_elo + away_elo) / 3000.0,
         "h2h_dominance": 0.0,
         "has_h2h": 0,
+        "draw_rate_home": 0.25,
+        "draw_rate_away": 0.25,
+        "both_draw_prone": 0.25,
+        "strength_parity": 1.0 / (1.0 + abs(home_elo - away_elo) / 100.0),
+        "defensive_similarity": 1.0,
+        "low_scoring_tendency": 0.0,
         "is_neutral": 1 if is_neutral else 0,
         "year_norm": (2026 - 1950) / 80.0,
         "is_wc": 1,
