@@ -48,8 +48,11 @@ class ImprovedMatchPredictor(nn.Module):
         team_embedding_dim: int = 64,
         num_match_features: int = 16,
         dropout_rate: float = 0.25,
+        is_neutral_idx: int = 21,
     ):
         super().__init__()
+
+        self.is_neutral_idx = is_neutral_idx
 
         # Team embeddings - richer representation
         self.team_embedding = nn.Embedding(num_teams, team_embedding_dim, padding_idx=0)
@@ -128,9 +131,12 @@ class ImprovedMatchPredictor(nn.Module):
         """
         batch_size = home_team_ids.size(0)
 
+        # Gate home/away indicators on neutral venue: zero out directional bias for neutral matches
+        is_neutral = match_features[:, self.is_neutral_idx:self.is_neutral_idx + 1]
+
         # Get team embeddings with strength bias
-        home_emb = self.team_embedding(home_team_ids) + self.home_indicator
-        away_emb = self.team_embedding(away_team_ids) + self.away_indicator
+        home_emb = self.team_embedding(home_team_ids) + self.home_indicator * (1 - is_neutral)
+        away_emb = self.team_embedding(away_team_ids) + self.away_indicator * (1 - is_neutral)
         home_strength = self.team_strength_bias(home_team_ids)
         away_strength = self.team_strength_bias(away_team_ids)
 
@@ -215,13 +221,14 @@ class ImprovedLoss(nn.Module):
         return ce_loss + self.goal_weight * goal_loss, ce_loss, goal_loss
 
 
-def create_improved_model(num_teams, num_match_features=16, device=None):
+def create_improved_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21):
     """Create the improved model."""
     model = ImprovedMatchPredictor(
         num_teams=num_teams + 1,
         team_embedding_dim=64,
         num_match_features=num_match_features,
         dropout_rate=0.25,
+        is_neutral_idx=is_neutral_idx,
     )
 
     if device:

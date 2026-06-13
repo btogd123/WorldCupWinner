@@ -422,6 +422,3 @@ def _print_usage():
 
 if __name__ == "__main__":
     main()
-        print()
-        # Auto-generate sample
-        generate_sample_odds()

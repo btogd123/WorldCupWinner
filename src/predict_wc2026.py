@@ -30,10 +30,12 @@ def load_model_and_assets():
     feature_cols = checkpoint["feature_cols"]
     num_teams = checkpoint["num_teams"]
     num_match_features = checkpoint["num_match_features"]
+    is_neutral_idx = checkpoint.get("is_neutral_idx", feature_cols.index("is_neutral"))
 
     # Create model and load weights
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = create_improved_model(num_teams - 1, num_match_features=num_match_features, device=device)
+    model = create_improved_model(num_teams - 1, num_match_features=num_match_features,
+                                   device=device, is_neutral_idx=is_neutral_idx)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
@@ -70,6 +72,7 @@ def build_match_features(wc_df, team_encoder):
     # Elo features
     df["elo_diff_norm"] = df["elo_diff"] / 400.0
     df["elo_ratio"] = (df["home_elo"] / df["away_elo"].clip(lower=1000)) - 1.0
+    df["elo_gap"] = abs(df["elo_diff"]) / 400.0
 
     # Goal difference
     df["home_goal_diff_avg"] = df["home_goals_scored_avg"] - df["home_goals_conceded_avg"]
@@ -83,7 +86,6 @@ def build_match_features(wc_df, team_encoder):
 
     # Match quality
     df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
-    df["elo_gap"] = abs(df["elo_diff"]) / 400.0
 
     # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
     df["draw_rate_home"] = df["home_draw_rate"]
@@ -250,7 +252,7 @@ def predict_all_wc_matches():
         print(f"  {pred}: {count} ({count/len(results)*100:.1f}%)")
 
     # Top teams by Elo
-    print("\nTop 10 Teams by Current Elo:")
+    print("\nTop 10 Teams by Current Elo Rating:")
     elo_df = pd.read_csv(ELO_RATINGS_PATH)
     for i, row in elo_df.head(10).iterrows():
         print(f"  {i+1}. {row['team']:20s} - {row['elo_rating']:.1f}")
@@ -360,45 +362,38 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         print(f"Error: {away_team} not in database")
         return
 
-    # Load processed data for feature computation
-    df = pd.read_csv(PROCESSED_DATA_PATH)
-    df["date"] = pd.to_datetime(df["date"])
-
     # Get current Elo ratings
     elo_df = pd.read_csv(ELO_RATINGS_PATH)
     home_elo = elo_df[elo_df["team"] == home_team]["elo_rating"].values[0]
     away_elo = elo_df[elo_df["team"] == away_team]["elo_rating"].values[0]
-
-    # Get latest form data for both teams
-    home_matches = df[(df["home_team"] == home_team) | (df["away_team"] == home_team)]
-    away_matches = df[(df["home_team"] == away_team) | (df["away_team"] == away_team)]
+    elo_diff = home_elo - away_elo
 
     # Simplified feature computation
     import random
     random.seed(42)
     np.random.seed(42)
 
-    # Build feature vector using average values
+    # Build feature vector using Elo
     feature_dict = {
-        "elo_advantage_home": (home_elo - away_elo) / 400.0,
-        "elo_quality": (home_elo + away_elo) / 3000.0,
-        "elo_diff_norm": (home_elo - away_elo) / 400.0,
+        "elo_advantage_home": elo_diff / 400.0,
+        "elo_quality": (home_elo + away_elo) / 2 / 1500.0,
+        "elo_diff_norm": elo_diff / 400.0,
         "elo_ratio": (home_elo / max(away_elo, 1000)) - 1.0,
-        "elo_gap": abs(home_elo - away_elo) / 400.0,
+        "elo_gap": abs(elo_diff) / 400.0,
         "form_advantage": 0.0,
         "form_quality": 0.0,
         "wr_advantage": 0.0,
         "gs_advantage": 0.0,
         "gc_advantage": 0.0,
         "goal_diff_advantage": 0.0,
-        "strength_advantage": (home_elo - away_elo) / 1500.0,
+        "strength_advantage": home_elo / 1500.0 - away_elo / 1500.0,
         "match_quality": (home_elo + away_elo) / 3000.0,
         "h2h_dominance": 0.0,
         "has_h2h": 0,
         "draw_rate_home": 0.25,
         "draw_rate_away": 0.25,
         "both_draw_prone": 0.25,
-        "strength_parity": 1.0 / (1.0 + abs(home_elo - away_elo) / 100.0),
+        "strength_parity": 1.0 / (1.0 + abs(elo_diff) / 100.0),
         "defensive_similarity": 1.0,
         "low_scoring_tendency": 0.0,
         "is_neutral": 1 if is_neutral else 0,
@@ -434,9 +429,9 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
     print(f"MATCH PREDICTION: {home_team} vs {away_team}")
     print("=" * 60)
     print(f"  Venue: {'Neutral' if is_neutral else 'Home for ' + home_team}")
-    print(f"  {home_team} Elo: {home_elo:.1f}")
-    print(f"  {away_team} Elo: {away_elo:.1f}")
-    print(f"  Elo Difference: {home_elo - away_elo:+.1f}")
+    print(f"  {home_team} Elo: {home_elo:.0f}")
+    print(f"  {away_team} Elo: {away_elo:.0f}")
+    print(f"  Elo Difference: {elo_diff:+.0f}")
     print()
     print(f"  {away_team} wins: {probs[0]:.1%}")
     print(f"  Draw:           {probs[1]:.1%}")

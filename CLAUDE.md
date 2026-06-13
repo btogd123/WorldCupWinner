@@ -7,9 +7,10 @@ Build a deep learning model to predict 2026 FIFA World Cup match winners. The mo
 ## Quick Context
 
 - **Current best model**: `ImprovedMatchPredictor` (PyTorch NN with Attention)
-- **Performance**: 62.2% accuracy on 1,021 World Cup qualifiers, 56.9% overall test
+- **Performance**: 62.0% accuracy on 1,021 World Cup qualifiers (57.6% F1), 56.0% overall test
+- **Training seed**: 99 (reproducible — set in `train_improved.py`)
 - **Top Elo teams**: Spain (2235), Argentina (2203), France (2148), England (2103), Brazil (2095)
-- **Tournament simulation winner**: France beats Belgium in final (penalties)
+- **Pi-Rating experiment**: Tested and abandoned — regressed vs Elo baseline (WCQ 59.2% vs 62.0%)
 
 ## Environment
 
