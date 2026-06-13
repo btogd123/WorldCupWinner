@@ -210,9 +210,15 @@ class ImprovedLoss(nn.Module):
         self.class_weights = class_weights
         self.goal_weight = goal_weight
 
-    def forward(self, logits, goals, targets, home_goals, away_goals):
-        # Classification loss with class weights
-        ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights)
+    def forward(self, logits, goals, targets, home_goals, away_goals, sample_weights=None):
+        # Classification loss with class weights and optional per-sample weights
+        ce_loss = F.cross_entropy(
+            logits, targets, weight=self.class_weights, reduction="none"
+        )
+        if sample_weights is not None:
+            ce_loss = (ce_loss * sample_weights).mean()
+        else:
+            ce_loss = ce_loss.mean()
 
         # Goal prediction loss (MSE)
         goal_targets = torch.stack([home_goals, away_goals], dim=1).float()

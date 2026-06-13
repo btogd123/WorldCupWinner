@@ -42,96 +42,6 @@ def load_and_filter_data():
     return df
 
 
-def augment_neutral_matches(df):
-    """Flip home/away for neutral-venue matches to teach the model symmetry.
-
-    On neutral ground, the 'home' label is arbitrary. By swapping home/away
-    and concatenating, the model learns that directional features should not
-    bias predictions toward home wins when the venue is neutral.
-    """
-    neutral_mask = df["neutral"].astype(bool)
-    neutral_count = neutral_mask.sum()
-    print(f"\nNeutral-venue matches to augment: {neutral_count} "
-          f"({neutral_count / len(df) * 100:.1f}%)")
-
-    if neutral_count == 0:
-        return df
-
-    flipped = df[neutral_mask].copy()
-
-    # -- Swap teams --
-    flipped["home_team"], flipped["away_team"] = (
-        flipped["away_team"].values,
-        flipped["home_team"].values,
-    )
-    flipped["home_team_id"], flipped["away_team_id"] = (
-        flipped["away_team_id"].values,
-        flipped["home_team_id"].values,
-    )
-
-    # -- Swap scores --
-    flipped["home_score"], flipped["away_score"] = (
-        flipped["away_score"].values,
-        flipped["home_score"].values,
-    )
-
-    # -- Swap Elo --
-    flipped["home_elo"], flipped["away_elo"] = (
-        flipped["away_elo"].values,
-        flipped["home_elo"].values,
-    )
-    flipped["home_elo_after"], flipped["away_elo_after"] = (
-        flipped["away_elo_after"].values,
-        flipped["home_elo_after"].values,
-    )
-    flipped["elo_diff"] = -flipped["elo_diff"]
-    flipped["elo_advantage_home"] = -flipped["elo_advantage_home"]
-    # elo_quality is symmetric, unchanged
-
-    # -- Swap form --
-    flipped["home_form"], flipped["away_form"] = (
-        flipped["away_form"].values,
-        flipped["home_form"].values,
-    )
-    flipped["form_advantage"] = -flipped["form_advantage"]
-    # form_quality is symmetric, unchanged
-
-    # -- Swap goal stats --
-    flipped["home_goals_scored_avg"], flipped["away_goals_scored_avg"] = (
-        flipped["away_goals_scored_avg"].values,
-        flipped["home_goals_scored_avg"].values,
-    )
-    flipped["home_goals_conceded_avg"], flipped["away_goals_conceded_avg"] = (
-        flipped["away_goals_conceded_avg"].values,
-        flipped["home_goals_conceded_avg"].values,
-    )
-    flipped["gs_advantage"] = -flipped["gs_advantage"]
-    flipped["gc_advantage"] = -flipped["gc_advantage"]
-
-    # -- Swap win/draw rates --
-    flipped["home_win_rate"], flipped["away_win_rate"] = (
-        flipped["away_win_rate"].values,
-        flipped["home_win_rate"].values,
-    )
-    flipped["home_draw_rate"], flipped["away_draw_rate"] = (
-        flipped["away_draw_rate"].values,
-        flipped["home_draw_rate"].values,
-    )
-    flipped["wr_advantage"] = -flipped["wr_advantage"]
-
-    # -- Swap H2H --
-    flipped["h2h_home_wins"], flipped["h2h_away_wins"] = (
-        flipped["h2h_away_wins"].values,
-        flipped["h2h_home_wins"].values,
-    )
-    flipped["h2h_home_advantage"] = -flipped["h2h_home_advantage"]
-    # h2h_count, h2h_draws, has_h2h are symmetric, unchanged
-
-    augmented = pd.concat([df, flipped], ignore_index=True)
-    print(f"Augmented dataset: {len(df)} -> {len(augmented)} matches "
-          f"(+{len(flipped)} flipped neutral matches)")
-    return augmented
-
 
 def feature_engineering_v2(df):
     """Same feature engineering as train_improved.py."""
@@ -179,6 +89,7 @@ def feature_engineering_v2(df):
             na=False,
         )
     ).astype(int)
+
     df["is_neutral"] = df["neutral"].astype(int)
 
     df["result"] = np.where(
