@@ -7,10 +7,12 @@ Build a deep learning model to predict 2026 FIFA World Cup match winners. The mo
 ## Quick Context
 
 - **Current best model**: `ImprovedMatchPredictor` (PyTorch NN with Attention)
-- **Performance**: 62.0% accuracy on 1,021 World Cup qualifiers (57.6% F1), 56.0% overall test
+- **Performance**: 58.8% accuracy on 1,021 World Cup qualifiers (53.6% F1), 53.9% overall test
+- **Production config**: Config C — draw-specific features (6) + neutral venue gating; no `group_round`
 - **Training seed**: 99 (reproducible — set in `train_improved.py`)
-- **Top Elo teams**: Spain (2235), Argentina (2203), France (2148), England (2103), Brazil (2095)
+- **Top Elo teams**: Spain (2235), Argentina (2203), France (2148), England (2103), Brazil (2087)
 - **Pi-Rating experiment**: Tested and abandoned — regressed vs Elo baseline (WCQ 59.2% vs 62.0%)
+- **Draw-specific features**: Implemented (Hvattum 2017) — 6 features from literature review
 
 ## Environment
 
@@ -87,12 +89,12 @@ PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --all
 
 ## Model Architecture
 
-### ImprovedMatchPredictor (459K params)
+### ImprovedMatchPredictor (460K params)
 ```
 Inputs:
-  ├── Home Team ID → Embedding(64-dim) + Home Indicator
-  ├── Away Team ID → Embedding(64-dim) + Away Indicator
-  └── Match Features (21-dim) → Encoder(128-dim)
+  ├── Home Team ID → Embedding(64-dim) + Home Indicator (gated by is_neutral)
+  ├── Away Team ID → Embedding(64-dim) + Away Indicator (gated by is_neutral)
+  └── Match Features (27-dim) → Encoder(128-dim)
 
 Team Interaction: Multi-Head Self-Attention (4 heads)
   → Home + Away embeddings attend to each other
@@ -100,11 +102,11 @@ Team Interaction: Multi-Head Self-Attention (4 heads)
 Combined (64+64+128=256-dim) → DenseBlock(256) → DenseBlock(256) → DenseBlock(128)
 
 Outputs:
-  ├── Classification Head: 128→64→32→3 (Away/Draw/Home, Focal Loss γ=2.0)
+  ├── Classification Head: 128→64→32→3 (Away/Draw/Home, CrossEntropyLoss)
   └── Goal Prediction Head: 128→64→2 (Home goals, Away goals, MSE auxiliary)
 ```
 
-### Features (21-dimensional)
+### Features (27-dimensional)
 | Category | Features | Source |
 |----------|----------|--------|
 | Elo (5) | elo_advantage_home, elo_quality, elo_diff_norm, elo_ratio, elo_gap | Dynamic Elo calculation |
@@ -112,15 +114,15 @@ Outputs:
 | Goals (3) | gs_advantage, gc_advantage, goal_diff_advantage | Rolling averages |
 | Strength (2) | strength_advantage, match_quality | Elo + form composite |
 | H2H (2) | h2h_dominance, has_h2h | Historical matchup lookup |
-| Context (6) | is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly | Match metadata |
+| Draw (6) | draw_rate_home, draw_rate_away, both_draw_prone, strength_parity, defensive_similarity, low_scoring_tendency | Hvattum 2017 — Config C |
+| Context (6) | is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly | Match metadata — `group_round` removed |
 
 ### Training Config
 - Train: 20,775 matches (2000-2021)
 - Val: 2,025 matches (2022-2023)
 - Test: 2,544 matches (2024-2026.6), including 1,021 WCQ
-- Optimizer: AdamW (lr=0.001), CosineAnnealingWarmRestarts
-- Loss: FocalLoss(γ=2.0) + 0.15 × MSE(goals)
-- Class weights: [1.17, 1.43, 0.69] (away/draw/home)
+- Optimizer: AdamW (lr=0.001), CosineAnnealingWarmRestarts (T_0=30, T_mult=2)
+- Loss: CrossEntropyLoss(class_weights) + 0.15 × MSE(goals)
 - Early stopping: patience=25 on val F1
 - Batch size: 64
 
@@ -133,7 +135,10 @@ When calculating Elo, future matches (WC 2026) have NaN scores. The condition `N
 Football is temporal. Training on 2024 to predict 2010 is cheating. Always use chronological split: train < val < test by date.
 
 ### 3. Data goes to 2026-06-27
-The dataset includes WC 2026 fixtures (72 matches with team names but NaN scores). These must be excluded from training but CAN be predicted.
+The dataset includes WC 2026 fixtures (72 matches with team names, 8 now have real scores). Unplayed fixtures must be excluded from training but CAN be predicted. Played WC 2026 scores must be added to `results.csv` to update Elo for remaining predictions.
+
+### 6. Neutral venue gating (Config C — do NOT break)
+Home/away indicators are `nn.Parameter` tensors. On neutral venues (`is_neutral=1`), these must be gated (multiplied by `1 - is_neutral`) so directional bias is zeroed out. Without gating, the model learns a global home advantage that doesn't exist on neutral ground. The gate was verified in ablation: Config C (gated) vs Config A (no gate) showed gains across all tournaments.
 
 ### 4. Windows encoding
 All scripts print non-ASCII chars. Use `PYTHONIOENCODING=utf-8` or avoid emoji in print statements.
@@ -149,11 +154,12 @@ The `home_elo` column in processed_matches.csv is the Elo BEFORE that match. The
 - Bug: NaN scores corrupted Elo calculation
 - Result: 43% accuracy
 
-### Attempt 2: Improved NN (CURRENT)
-- File: `src/improved_model.py`
-- 21 features, Attention, Focal Loss, Multi-task
+### Attempt 2: Improved NN (CURRENT — Config C)
+- Files: `src/improved_model.py`, `src/train_improved.py`
+- 27 features, Attention, CrossEntropyLoss, Multi-task, neutral venue gating
+- Draw-specific features (Hvattum 2017), `group_round` removed after ablation showed harm
 - Elo bug fixed
-- Result: 56.9% acc, 62.2% WCQ acc
+- Result: 53.9% test acc, 58.8% WCQ acc
 
 ### Attempt 3: Kaggle GBDT Ensemble (DELETED — inferior overall)
 - Files: `src/train_kaggle.py`, `src/hybrid_ensemble.py` (DELETED)
@@ -189,9 +195,9 @@ From `docs/literature_review.md`, ranked by ROI:
 
 | Priority | Item | Expected Gain | Difficulty |
 |----------|------|--------------|------------|
-| 🥇 | Add betting odds features | +3-5% Acc | Low |
-| 🥈 | Pi-Rating instead of pure Elo | +1-3% Acc | Low |
-| 🥉 | Draw-specific features | +5-10% Draw Recall | Low |
+| 🥇 | ~~Add betting odds features~~ (user rejected) | — | — |
+| 🥈 | ~~Pi-Rating instead of pure Elo~~ (tested, regressed) | — | — |
+| 🥉 | ~~Draw-specific features~~ (implemented, Config C) | — | — |
 | 4 | Positional power (atk/def/mid) | +2-3% Acc | Medium |
 | 5 | Player-level features (market value, age) | +2-4% Acc | Medium |
 | 6 | Multi-Headed LSTM | +5-10% Acc | High |

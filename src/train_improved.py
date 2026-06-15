@@ -26,6 +26,7 @@ from config import (
     IMPORTANT_TOURNAMENTS,
 )
 from improved_model import create_improved_model, ImprovedLoss
+from calibration import TemperatureScaler
 
 
 def load_and_prepare_data():
@@ -418,28 +419,102 @@ def train_improved():
 
     print(f"\nBest val F1: {best_val_f1:.4f}")
 
+    # Load best model
+    checkpoint = torch.load(MODEL_PATH, weights_only=False)
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    # Temperature Scaling calibration (on validation set)
+    print("\n" + "=" * 60)
+    print("Temperature Scaling Calibration")
+    print("=" * 60)
+
+    # Collect validation logits
+    model.eval()
+    val_logits, val_labels = [], []
+    with torch.no_grad():
+        for X, h_ids, a_ids, y, _, _ in val_loader:
+            X = X.to(device)
+            h_ids = h_ids.to(device)
+            a_ids = a_ids.to(device)
+            logits = model(h_ids, a_ids, X)
+            val_logits.append(logits.cpu())
+            val_labels.append(y)
+
+    val_logits = torch.cat(val_logits).numpy()
+    val_labels = torch.cat(val_labels).numpy()
+
+    # Learn optimal temperature
+    scaler_temp = TemperatureScaler()
+    scaler_temp.fit(val_logits, val_labels, device=device)
+    T = scaler_temp.get_temperature()
+    print(f"Learned temperature: T = {T:.4f}")
+
+    # Show calibration effect
+    val_probs_raw = torch.softmax(torch.FloatTensor(val_logits), dim=-1).numpy()
+    val_probs_cal = scaler_temp.calibrate(val_logits)
+    val_preds_raw = np.argmax(val_probs_raw, axis=1)
+    val_preds_cal = np.argmax(val_probs_cal, axis=1)
+
+    raw_acc = accuracy_score(val_labels, val_preds_raw)
+    cal_acc = accuracy_score(val_labels, val_preds_cal)
+    raw_f1 = f1_score(val_labels, val_preds_raw, average="macro")
+    cal_f1 = f1_score(val_labels, val_preds_cal, average="macro")
+
+    print(f"Validation: Raw Acc={raw_acc:.4f} F1={raw_f1:.4f} → Cal Acc={cal_acc:.4f} F1={cal_f1:.4f}")
+    if T < 1.0:
+        print(f"T={T:.4f} < 1 → model was underconfident, probabilities sharpened")
+    else:
+        print(f"T={T:.4f} > 1 → model was overconfident, probabilities smoothed")
+
+    # Re-save checkpoint with temperature
+    checkpoint["temperature"] = T
+    torch.save(checkpoint, MODEL_PATH)
+    print(f"Temperature saved to checkpoint.")
+
     # Test evaluation
     print("\n" + "=" * 60)
     print("Test Set Evaluation")
     print("=" * 60)
 
-    # Load best model
-    checkpoint = torch.load(MODEL_PATH, weights_only=False)
-    model.load_state_dict(checkpoint["model_state_dict"])
-
     test_loss, test_acc, test_f1, y_pred, y_true, y_prob = evaluate_improved(
         model, test_loader, criterion, device
     )
 
-    print(f"\nTest: Loss={test_loss:.4f}, Acc={test_acc:.4f}, F1={test_f1:.4f}")
-    print("\nClassification Report:")
-    print(classification_report(y_true, y_pred, target_names=["Away Win", "Draw", "Home Win"]))
-    print("\nConfusion Matrix:")
-    cm = confusion_matrix(y_true, y_pred)
+    # Temperature-calibrated test evaluation
+    test_logits_raw = np.array([p @ np.array([0, 1, 2]) for p in y_prob])  # approximate
+    # Better: re-collect logits
+    model.eval()
+    test_logits_list, test_labels_list = [], []
+    with torch.no_grad():
+        for X, h_ids, a_ids, y, _, _ in test_loader:
+            X = X.to(device)
+            h_ids = h_ids.to(device)
+            a_ids = a_ids.to(device)
+            logits_t = model(h_ids, a_ids, X)
+            test_logits_list.append(logits_t.cpu())
+            test_labels_list.append(y)
+
+    test_logits_all = torch.cat(test_logits_list).numpy()
+    test_labels_all = torch.cat(test_labels_list).numpy()
+
+    test_probs_cal = scaler_temp.calibrate(test_logits_all)
+    test_preds_cal = np.argmax(test_probs_cal, axis=1)
+    test_acc_cal = accuracy_score(test_labels_all, test_preds_cal)
+    test_f1_cal = f1_score(test_labels_all, test_preds_cal, average="macro")
+
+    print(f"\nTest (raw):       Acc={test_acc:.4f}, F1={test_f1:.4f}")
+    print(f"Test (calibrated): Acc={test_acc_cal:.4f}, F1={test_f1_cal:.4f}")
+    print(f"Temperature: T={T:.4f}")
+
+    print("\nClassification Report (calibrated):")
+    print(classification_report(test_labels_all, test_preds_cal, target_names=["Away Win", "Draw", "Home Win"]))
+    print("\nConfusion Matrix (calibrated):")
+    cm = confusion_matrix(test_labels_all, test_preds_cal)
     print(pd.DataFrame(cm, index=["Away Win", "Draw", "Home Win"], columns=["Away Win", "Draw", "Home Win"]))
 
     # World Cup qualifier specific evaluation
     wcq_test = test_df[test_df["tournament"].str.contains("qualification", na=False)]
+    wcq_acc, wcq_f1, wcq_acc_cal, wcq_f1_cal = None, None, None, None
     if len(wcq_test) > 0:
         X_wcq, h_wcq, a_wcq, y_wcq, _, _, _, _ = prepare_enhanced_data(
             wcq_test, enhanced_scaler, team_encoder
@@ -455,18 +530,28 @@ def train_improved():
             wcq_acc = accuracy_score(y_wcq, wcq_preds)
             wcq_f1 = f1_score(y_wcq, wcq_preds, average="macro")
 
+            # Calibrated
+            wcq_probs_cal = scaler_temp.calibrate(logits.cpu().numpy())
+            wcq_preds_cal = np.argmax(wcq_probs_cal, axis=1)
+            wcq_acc_cal = accuracy_score(y_wcq, wcq_preds_cal)
+            wcq_f1_cal = f1_score(y_wcq, wcq_preds_cal, average="macro")
+
         print(f"\nWorld Cup Qualifiers ({len(wcq_test)} matches):")
-        print(f"  Accuracy: {wcq_acc:.4f}")
-        print(f"  Macro F1: {wcq_f1:.4f}")
-        print(classification_report(y_wcq, wcq_preds, target_names=["Away Win", "Draw", "Home Win"]))
+        print(f"  Raw:        Acc={wcq_acc:.4f}, F1={wcq_f1:.4f}")
+        print(f"  Calibrated: Acc={wcq_acc_cal:.4f}, F1={wcq_f1_cal:.4f}")
 
     # Save results
     results = {
         "test_accuracy": float(test_acc),
         "test_f1": float(test_f1),
+        "test_accuracy_calibrated": float(test_acc_cal),
+        "test_f1_calibrated": float(test_f1_cal),
+        "temperature": float(T),
         "best_val_f1": float(best_val_f1),
         "wcq_accuracy": float(wcq_acc) if len(wcq_test) > 0 else None,
         "wcq_f1": float(wcq_f1) if len(wcq_test) > 0 else None,
+        "wcq_accuracy_calibrated": float(wcq_acc_cal) if len(wcq_test) > 0 else None,
+        "wcq_f1_calibrated": float(wcq_f1_cal) if len(wcq_test) > 0 else None,
     }
     with open(os.path.join(RESULTS_DIR, "improved_results.json"), "w") as f:
         json.dump(results, f, indent=2)

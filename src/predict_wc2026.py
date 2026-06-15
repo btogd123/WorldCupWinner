@@ -31,6 +31,7 @@ def load_model_and_assets():
     num_teams = checkpoint["num_teams"]
     num_match_features = checkpoint["num_match_features"]
     is_neutral_idx = checkpoint.get("is_neutral_idx", feature_cols.index("is_neutral"))
+    temperature = checkpoint.get("temperature", 1.0)
 
     # Create model and load weights
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -41,8 +42,10 @@ def load_model_and_assets():
 
     print(f"Model loaded: {num_teams - 1} teams, {num_match_features} features")
     print(f"Device: {device}")
+    if temperature != 1.0:
+        print(f"Temperature scaling: T = {temperature:.4f}")
 
-    return model, team_encoder, scaler, feature_cols, device
+    return model, team_encoder, scaler, feature_cols, temperature, device
 
 
 def get_wc2026_matches():
@@ -140,13 +143,11 @@ def prepare_wc_features(df, scaler, feature_cols):
     )
 
 
-def simulate_match(model, home_team, away_team, features, device, team_encoder, scaler, feature_cols):
+def simulate_match(model, home_team, away_team, features, device, team_encoder, scaler, feature_cols, temperature=1.0):
     """
     Simulate a single match between two teams.
     Allows custom team pairings not in the original dataset.
     """
-    # Create a minimal feature vector
-    # For custom matchups, we use available features from the closest context
     model.eval()
     with torch.no_grad():
         X_t = torch.FloatTensor(features).unsqueeze(0).to(device)
@@ -154,7 +155,7 @@ def simulate_match(model, home_team, away_team, features, device, team_encoder, 
         a_t = torch.LongTensor([away_team]).to(device)
 
         logits = model(h_t, a_t, X_t)
-        probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
+        probs = torch.softmax(logits / temperature, dim=-1).cpu().numpy()[0]
 
     return probs  # [away_win_prob, draw_prob, home_win_prob]
 
@@ -166,7 +167,7 @@ def predict_all_wc_matches():
     print("=" * 60)
 
     # Load assets
-    model, team_encoder, scaler, feature_cols, device = load_model_and_assets()
+    model, team_encoder, scaler, feature_cols, temperature, device = load_model_and_assets()
 
     # Get WC 2026 matches
     wc_df = get_wc2026_matches()
@@ -193,8 +194,9 @@ def predict_all_wc_matches():
         a_t = a_t.to(device)
 
         logits = model(h_t, a_t, X_t)
-        probs = torch.softmax(logits, dim=-1).cpu().numpy()
-        preds = torch.argmax(logits, dim=1).cpu().numpy()
+        cal_logits = logits / temperature
+        probs = torch.softmax(cal_logits, dim=-1).cpu().numpy()
+        preds = torch.argmax(cal_logits, dim=1).cpu().numpy()
 
     # Compile results
     results = []
@@ -353,7 +355,7 @@ def create_wc2026_schedule(team_encoder):
 
 def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA World Cup"):
     """Predict a single custom match."""
-    model, team_encoder, scaler, feature_cols, device = load_model_and_assets()
+    model, team_encoder, scaler, feature_cols, temperature, device = load_model_and_assets()
 
     if home_team not in team_encoder.classes_:
         print(f"Error: {home_team} not in database")
@@ -418,7 +420,8 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         a_t = torch.LongTensor([away_id]).to(device)
 
         logits = model(h_t, a_t, X_t)
-        probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
+        cal_logits = logits / temperature
+        probs = torch.softmax(cal_logits, dim=-1).cpu().numpy()[0]
 
     labels = ["Away Win", "Draw", "Home Win"]
     winner = home_team if probs[2] > max(probs[0], probs[1]) else (

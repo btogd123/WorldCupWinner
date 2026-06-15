@@ -49,10 +49,12 @@ class ImprovedMatchPredictor(nn.Module):
         num_match_features: int = 16,
         dropout_rate: float = 0.25,
         is_neutral_idx: int = 21,
+        use_neutral_gating: bool = True,
     ):
         super().__init__()
 
         self.is_neutral_idx = is_neutral_idx
+        self.use_neutral_gating = use_neutral_gating
 
         # Team embeddings - richer representation
         self.team_embedding = nn.Embedding(num_teams, team_embedding_dim, padding_idx=0)
@@ -135,8 +137,12 @@ class ImprovedMatchPredictor(nn.Module):
         is_neutral = match_features[:, self.is_neutral_idx:self.is_neutral_idx + 1]
 
         # Get team embeddings with strength bias
-        home_emb = self.team_embedding(home_team_ids) + self.home_indicator * (1 - is_neutral)
-        away_emb = self.team_embedding(away_team_ids) + self.away_indicator * (1 - is_neutral)
+        if self.use_neutral_gating:
+            home_emb = self.team_embedding(home_team_ids) + self.home_indicator * (1 - is_neutral)
+            away_emb = self.team_embedding(away_team_ids) + self.away_indicator * (1 - is_neutral)
+        else:
+            home_emb = self.team_embedding(home_team_ids) + self.home_indicator
+            away_emb = self.team_embedding(away_team_ids) + self.away_indicator
         home_strength = self.team_strength_bias(home_team_ids)
         away_strength = self.team_strength_bias(away_team_ids)
 
@@ -227,7 +233,7 @@ class ImprovedLoss(nn.Module):
         return ce_loss + self.goal_weight * goal_loss, ce_loss, goal_loss
 
 
-def create_improved_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21):
+def create_improved_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, use_neutral_gating=True):
     """Create the improved model."""
     model = ImprovedMatchPredictor(
         num_teams=num_teams + 1,
@@ -235,6 +241,7 @@ def create_improved_model(num_teams, num_match_features=16, device=None, is_neut
         num_match_features=num_match_features,
         dropout_rate=0.25,
         is_neutral_idx=is_neutral_idx,
+        use_neutral_gating=use_neutral_gating,
     )
 
     if device:
