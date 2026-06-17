@@ -13,7 +13,6 @@ import os
 from datetime import datetime
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.utils.class_weight import compute_class_weight
 
 from config import (
     PROCESSED_DATA_PATH,
@@ -373,15 +372,8 @@ def train_improved():
     num_teams = len(team_encoder.classes_)
     model = create_improved_model(num_teams, num_match_features=len(feature_cols), device=device, is_neutral_idx=is_neutral_idx)
 
-    # Class weights
-    class_weights = compute_class_weight(
-        "balanced", classes=np.unique(y_train), y=y_train
-    )
-    class_weights_t = torch.FloatTensor(class_weights).to(device)
-    print(f"Class weights: {class_weights}")
-
-    # Loss and optimizer
-    criterion = ImprovedLoss(class_weights=class_weights_t, goal_weight=0.15)
+    # Loss: plain CE, no class weights (backtest: +6pp Acc, -11% Brier vs weighted)
+    criterion = ImprovedLoss(loss_type="ce", goal_weight=0.15)
     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=30, T_mult=2, eta_min=1e-6

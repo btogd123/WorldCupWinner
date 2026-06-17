@@ -208,29 +208,63 @@ class DenseBlock(nn.Module):
         return out + residual
 
 
-class ImprovedLoss(nn.Module):
-    """Combined loss: classification + auxiliary goal prediction."""
+class FocalLoss(nn.Module):
+    """Focal Loss for classification: FL(p_t) = -(1-p_t)^gamma * log(p_t).
 
-    def __init__(self, class_weights=None, goal_weight=0.1):
+    Solves cross-entropy's asymmetry where one confident wrong prediction
+    (-log(0.02)=3.9) costs 78x a confident correct one (-log(0.95)=0.05).
+    With gamma=2, hedging (p=0.6, loss=0.082) costs 630x more than being
+    confident & correct (p=0.95, loss=0.00013). The model is strongly
+    incentivized to make decisive predictions on clear matches.
+    """
+
+    def __init__(self, gamma=2.0, weight=None, reduction="mean"):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.reduction = reduction
+
+    def forward(self, logits, targets):
+        ce = F.cross_entropy(logits, targets, weight=self.weight, reduction="none")
+        pt = torch.exp(-ce)  # p_t for the true class
+        focal = (1 - pt) ** self.gamma * ce
+
+        if self.reduction == "mean":
+            return focal.mean()
+        elif self.reduction == "sum":
+            return focal.sum()
+        return focal
+
+
+class ImprovedLoss(nn.Module):
+    """Combined loss: classification + auxiliary goal prediction.
+
+    Supports both standard cross-entropy and focal loss.
+    """
+
+    def __init__(self, class_weights=None, goal_weight=0.1, loss_type="ce", gamma=2.0):
         super().__init__()
         self.class_weights = class_weights
         self.goal_weight = goal_weight
+        self.loss_type = loss_type
+        self.focal = FocalLoss(gamma=gamma, weight=class_weights) if loss_type == "focal" else None
 
     def forward(self, logits, goals, targets, home_goals, away_goals, sample_weights=None):
-        # Classification loss with class weights and optional per-sample weights
-        ce_loss = F.cross_entropy(
-            logits, targets, weight=self.class_weights, reduction="none"
-        )
-        if sample_weights is not None:
-            ce_loss = (ce_loss * sample_weights).mean()
+        if self.loss_type == "focal":
+            cls_loss = self.focal(logits, targets)
         else:
-            ce_loss = ce_loss.mean()
+            cls_loss = F.cross_entropy(
+                logits, targets, weight=self.class_weights, reduction="none"
+            )
+            if sample_weights is not None:
+                cls_loss = (cls_loss * sample_weights).mean()
+            else:
+                cls_loss = cls_loss.mean()
 
-        # Goal prediction loss (MSE)
         goal_targets = torch.stack([home_goals, away_goals], dim=1).float()
         goal_loss = F.mse_loss(goals, goal_targets)
 
-        return ce_loss + self.goal_weight * goal_loss, ce_loss, goal_loss
+        return cls_loss + self.goal_weight * goal_loss, cls_loss, goal_loss
 
 
 def create_improved_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, use_neutral_gating=True):
