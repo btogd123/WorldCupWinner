@@ -182,29 +182,42 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False):
     return X, home_ids, away_ids, y, home_goals, away_goals, feature_cols, None
 
 
-def split_data_improved(df, train_end="2021-12-31", val_end="2023-12-31"):
-    """Split data chronologically with better filtering."""
-    # Remove ancient data - modern football patterns are different
+def split_data_improved(df, train_end="2021-12-31", val_end="2023-12-31", val_start=None):
+    """Split data chronologically with better filtering.
+
+    Plan C (deployment): train_end="2025-07-01", val_start="2026-01-01", val_end="2026-06-16"
+    Train = [2000-01-01, 2025-06-30] U [2026-01-01, 2026-06-16] (includes played WC)
+    Val   = [2025-07-01, 2025-12-31]
+    """
     df = df[df["date"] >= pd.to_datetime("2000-01-01")]
-
-    # Remove future matches (no actual results)
-    df = df[df["date"] <= pd.to_datetime("2026-06-10")]
-
-    # Remove matches with NaN scores
+    df = df[df["date"] <= pd.to_datetime("2026-06-16")]
     df = df.dropna(subset=["home_score", "away_score"])
 
-    train = df[df["date"] < pd.to_datetime(train_end)]
-    val = df[
-        (df["date"] >= pd.to_datetime(train_end))
-        & (df["date"] < pd.to_datetime(val_end))
-    ]
+    if val_start is not None:
+        # Gap split: train has two blocks with a val gap in between
+        train_before = df[df["date"] < pd.to_datetime(train_end)]
+        train_after = df[
+            (df["date"] >= pd.to_datetime(val_start))
+            & (df["date"] < pd.to_datetime(val_end))
+        ]
+        train = pd.concat([train_before, train_after])
+        val = df[
+            (df["date"] >= pd.to_datetime(train_end))
+            & (df["date"] < pd.to_datetime(val_start))
+        ]
+    else:
+        train = df[df["date"] < pd.to_datetime(train_end)]
+        val = df[
+            (df["date"] >= pd.to_datetime(train_end))
+            & (df["date"] < pd.to_datetime(val_end))
+        ]
+
     test = df[df["date"] >= pd.to_datetime(val_end)]
 
     print(f"\nSplit: Train={len(train)} ({train['date'].min().date()} to {train['date'].max().date()})")
     print(f"       Val={len(val)}   ({val['date'].min().date()} to {val['date'].max().date()})")
     print(f"       Test={len(test)}  ({test['date'].min().date()} to {test['date'].max().date()})")
 
-    # Show World Cup qualifiers in test
     wcq = test[test["tournament"].str.contains("qualification", na=False)]
     print(f"       WCQ in test: {len(wcq)}")
 
@@ -307,8 +320,10 @@ def train_improved():
     # Enhanced feature engineering
     df = feature_engineering_v2(df)
 
-    # Split data
-    train_df, val_df, test_df = split_data_improved(df)
+    # Plan C split: val=2025-H2 gap, train includes 2026 (with played WC matches through June 16)
+    train_df, val_df, test_df = split_data_improved(
+        df, train_end="2025-07-01", val_start="2026-01-01", val_end="2026-06-17"
+    )
 
     # Prepare features with dedicated scaler
     X_train, h_train, a_train, y_train, hg_train, ag_train, feature_cols, enhanced_scaler = \
@@ -317,9 +332,12 @@ def train_improved():
     X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = prepare_enhanced_data(
         val_df, enhanced_scaler, team_encoder
     )
-    X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = prepare_enhanced_data(
-        test_df, enhanced_scaler, team_encoder
-    )
+
+    has_test = len(test_df) > 0
+    if has_test:
+        X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = prepare_enhanced_data(
+            test_df, enhanced_scaler, team_encoder
+        )
 
     print(f"Features ({len(feature_cols)}): {feature_cols}")
 
@@ -340,21 +358,12 @@ def train_improved():
     hg_val_t = torch.FloatTensor(hg_val)
     ag_val_t = torch.FloatTensor(ag_val)
 
-    X_test_t = torch.FloatTensor(X_test)
-    h_test_t = torch.LongTensor(h_test)
-    a_test_t = torch.LongTensor(a_test)
-    y_test_t = torch.LongTensor(y_test)
-    hg_test_t = torch.FloatTensor(hg_test)
-    ag_test_t = torch.FloatTensor(ag_test)
-
     # Create datasets and loaders
     train_dataset = TensorDataset(X_train_t, h_train_t, a_train_t, y_train_t, hg_train_t, ag_train_t)
     val_dataset = TensorDataset(X_val_t, h_val_t, a_val_t, y_val_t, hg_val_t, ag_val_t)
-    test_dataset = TensorDataset(X_test_t, h_test_t, a_test_t, y_test_t, hg_test_t, ag_test_t)
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE * 2, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE * 2, shuffle=False)
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -484,87 +493,103 @@ def train_improved():
     torch.save(checkpoint, MODEL_PATH)
     print(f"Temperature saved to checkpoint.")
 
-    # Test evaluation
-    print("\n" + "=" * 60)
-    print("Test Set Evaluation")
-    print("=" * 60)
+    # Test evaluation (skip if no test data)
+    if has_test:
+        X_test_t = torch.FloatTensor(X_test)
+        h_test_t = torch.LongTensor(h_test)
+        a_test_t = torch.LongTensor(a_test)
+        y_test_t = torch.LongTensor(y_test)
+        hg_test_t = torch.FloatTensor(hg_test)
+        ag_test_t = torch.FloatTensor(ag_test)
+        test_dataset = TensorDataset(X_test_t, h_test_t, a_test_t, y_test_t, hg_test_t, ag_test_t)
+        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE * 2, shuffle=False)
 
-    test_loss, test_acc, test_f1, y_pred, y_true, y_prob = evaluate_improved(
-        model, test_loader, criterion, device
-    )
+        print("\n" + "=" * 60)
+        print("Test Set Evaluation")
+        print("=" * 60)
 
-    # Temperature-calibrated test evaluation
-    test_logits_raw = np.array([p @ np.array([0, 1, 2]) for p in y_prob])  # approximate
-    # Better: re-collect logits
-    model.eval()
-    test_logits_list, test_labels_list = [], []
-    with torch.no_grad():
-        for X, h_ids, a_ids, y, _, _ in test_loader:
-            X = X.to(device)
-            h_ids = h_ids.to(device)
-            a_ids = a_ids.to(device)
-            logits_t = model(h_ids, a_ids, X)
-            test_logits_list.append(logits_t.cpu())
-            test_labels_list.append(y)
-
-    test_logits_all = torch.cat(test_logits_list).numpy()
-    test_labels_all = torch.cat(test_labels_list).numpy()
-
-    test_probs_cal = scaler_temp.calibrate(test_logits_all)
-    test_preds_cal = np.argmax(test_probs_cal, axis=1)
-    test_acc_cal = accuracy_score(test_labels_all, test_preds_cal)
-    test_f1_cal = f1_score(test_labels_all, test_preds_cal, average="macro")
-
-    print(f"\nTest (raw):       Acc={test_acc:.4f}, F1={test_f1:.4f}")
-    print(f"Test (calibrated): Acc={test_acc_cal:.4f}, F1={test_f1_cal:.4f}")
-    print(f"Temperature: T={T:.4f}")
-
-    print("\nClassification Report (calibrated):")
-    print(classification_report(test_labels_all, test_preds_cal, target_names=["Away Win", "Draw", "Home Win"]))
-    print("\nConfusion Matrix (calibrated):")
-    cm = confusion_matrix(test_labels_all, test_preds_cal)
-    print(pd.DataFrame(cm, index=["Away Win", "Draw", "Home Win"], columns=["Away Win", "Draw", "Home Win"]))
-
-    # World Cup qualifier specific evaluation
-    wcq_test = test_df[test_df["tournament"].str.contains("qualification", na=False)]
-    wcq_acc, wcq_f1, wcq_acc_cal, wcq_f1_cal = None, None, None, None
-    if len(wcq_test) > 0:
-        X_wcq, h_wcq, a_wcq, y_wcq, _, _, _, _ = prepare_enhanced_data(
-            wcq_test, enhanced_scaler, team_encoder
+        test_loss, test_acc, test_f1, y_pred, y_true, y_prob = evaluate_improved(
+            model, test_loader, criterion, device
         )
+
         model.eval()
+        test_logits_list, test_labels_list = [], []
         with torch.no_grad():
-            X_t = torch.FloatTensor(X_wcq).to(device)
-            h_t = torch.LongTensor(h_wcq + 1).to(device)
-            a_t = torch.LongTensor(a_wcq + 1).to(device)
-            y_t = torch.LongTensor(y_wcq).to(device)
-            logits = model(h_t, a_t, X_t)
-            wcq_preds = torch.argmax(logits, dim=1).cpu().numpy()
-            wcq_acc = accuracy_score(y_wcq, wcq_preds)
-            wcq_f1 = f1_score(y_wcq, wcq_preds, average="macro")
+            for X, h_ids, a_ids, y, _, _ in test_loader:
+                X = X.to(device)
+                h_ids = h_ids.to(device)
+                a_ids = a_ids.to(device)
+                logits_t = model(h_ids, a_ids, X)
+                test_logits_list.append(logits_t.cpu())
+                test_labels_list.append(y)
 
-            # Calibrated
-            wcq_probs_cal = scaler_temp.calibrate(logits.cpu().numpy())
-            wcq_preds_cal = np.argmax(wcq_probs_cal, axis=1)
-            wcq_acc_cal = accuracy_score(y_wcq, wcq_preds_cal)
-            wcq_f1_cal = f1_score(y_wcq, wcq_preds_cal, average="macro")
+        test_logits_all = torch.cat(test_logits_list).numpy()
+        test_labels_all = torch.cat(test_labels_list).numpy()
 
-        print(f"\nWorld Cup Qualifiers ({len(wcq_test)} matches):")
-        print(f"  Raw:        Acc={wcq_acc:.4f}, F1={wcq_f1:.4f}")
-        print(f"  Calibrated: Acc={wcq_acc_cal:.4f}, F1={wcq_f1_cal:.4f}")
+        test_probs_cal = scaler_temp.calibrate(test_logits_all)
+        test_preds_cal = np.argmax(test_probs_cal, axis=1)
+        test_acc_cal = accuracy_score(test_labels_all, test_preds_cal)
+        test_f1_cal = f1_score(test_labels_all, test_preds_cal, average="macro")
+
+        print(f"\nTest (raw):       Acc={test_acc:.4f}, F1={test_f1:.4f}")
+        print(f"Test (calibrated): Acc={test_acc_cal:.4f}, F1={test_f1_cal:.4f}")
+        print(f"Temperature: T={T:.4f}")
+
+        print("\nClassification Report (calibrated):")
+        print(classification_report(test_labels_all, test_preds_cal, target_names=["Away Win", "Draw", "Home Win"]))
+        print("\nConfusion Matrix (calibrated):")
+        cm = confusion_matrix(test_labels_all, test_preds_cal)
+        print(pd.DataFrame(cm, index=["Away Win", "Draw", "Home Win"], columns=["Away Win", "Draw", "Home Win"]))
+
+        # World Cup qualifier specific evaluation
+        wcq_test = test_df[test_df["tournament"].str.contains("qualification", na=False)]
+        wcq_acc, wcq_f1, wcq_acc_cal, wcq_f1_cal = None, None, None, None
+        if len(wcq_test) > 0:
+            X_wcq, h_wcq, a_wcq, y_wcq, _, _, _, _ = prepare_enhanced_data(
+                wcq_test, enhanced_scaler, team_encoder
+            )
+            model.eval()
+            with torch.no_grad():
+                X_t = torch.FloatTensor(X_wcq).to(device)
+                h_t = torch.LongTensor(h_wcq + 1).to(device)
+                a_t = torch.LongTensor(a_wcq + 1).to(device)
+                y_t = torch.LongTensor(y_wcq).to(device)
+                logits = model(h_t, a_t, X_t)
+                wcq_preds = torch.argmax(logits, dim=1).cpu().numpy()
+                wcq_acc = accuracy_score(y_wcq, wcq_preds)
+                wcq_f1 = f1_score(y_wcq, wcq_preds, average="macro")
+
+                wcq_probs_cal = scaler_temp.calibrate(logits.cpu().numpy())
+                wcq_preds_cal = np.argmax(wcq_probs_cal, axis=1)
+                wcq_acc_cal = accuracy_score(y_wcq, wcq_preds_cal)
+                wcq_f1_cal = f1_score(y_wcq, wcq_preds_cal, average="macro")
+
+            print(f"\nWorld Cup Qualifiers ({len(wcq_test)} matches):")
+            print(f"  Raw:        Acc={wcq_acc:.4f}, F1={wcq_f1:.4f}")
+            print(f"  Calibrated: Acc={wcq_acc_cal:.4f}, F1={wcq_f1_cal:.4f}")
+    else:
+        test_acc = None
+        test_f1 = None
+        test_acc_cal = None
+        test_f1_cal = None
+        wcq_acc = None
+        wcq_f1 = None
+        wcq_acc_cal = None
+        wcq_f1_cal = None
+        print("\nNo test set available (all scored matches used for training/validation)")
 
     # Save results
     results = {
-        "test_accuracy": float(test_acc),
-        "test_f1": float(test_f1),
-        "test_accuracy_calibrated": float(test_acc_cal),
-        "test_f1_calibrated": float(test_f1_cal),
+        "test_accuracy": float(test_acc) if test_acc is not None else None,
+        "test_f1": float(test_f1) if test_f1 is not None else None,
+        "test_accuracy_calibrated": float(test_acc_cal) if test_acc_cal is not None else None,
+        "test_f1_calibrated": float(test_f1_cal) if test_f1_cal is not None else None,
         "temperature": float(T),
         "best_val_f1": float(best_val_f1),
-        "wcq_accuracy": float(wcq_acc) if len(wcq_test) > 0 else None,
-        "wcq_f1": float(wcq_f1) if len(wcq_test) > 0 else None,
-        "wcq_accuracy_calibrated": float(wcq_acc_cal) if len(wcq_test) > 0 else None,
-        "wcq_f1_calibrated": float(wcq_f1_cal) if len(wcq_test) > 0 else None,
+        "wcq_accuracy": float(wcq_acc) if (wcq_acc is not None) else None,
+        "wcq_f1": float(wcq_f1) if (wcq_f1 is not None) else None,
+        "wcq_accuracy_calibrated": float(wcq_acc_cal) if (wcq_acc_cal is not None) else None,
+        "wcq_f1_calibrated": float(wcq_f1_cal) if (wcq_f1_cal is not None) else None,
     }
     with open(os.path.join(RESULTS_DIR, "improved_results.json"), "w") as f:
         json.dump(results, f, indent=2)

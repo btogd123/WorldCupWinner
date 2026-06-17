@@ -61,7 +61,9 @@ def get_wc2026_matches():
     )
 
     wc_df = df[wc_mask].copy()
-    print(f"Found {len(wc_df)} World Cup 2026 matches")
+    # Only predict unplayed matches (no scores yet)
+    wc_df = wc_df[wc_df["home_score"].isna()].copy()
+    print(f"Found {len(wc_df)} unplayed World Cup 2026 matches")
     return wc_df
 
 
@@ -392,6 +394,10 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "match_quality": (home_elo + away_elo) / 3000.0,
         "h2h_dominance": 0.0,
         "has_h2h": 0,
+        "sim_wr_advantage": 0.0,
+        "sim_gs_advantage": 0.0,
+        "sim_wr_quality": 0.0,
+        "sim_dr_quality": 0.0,
         "draw_rate_home": 0.25,
         "draw_rate_away": 0.25,
         "both_draw_prone": 0.25,
