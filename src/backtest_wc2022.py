@@ -25,6 +25,7 @@ from improved_model import create_improved_model, ImprovedLoss
 # Tournament definitions: (name, tournament keyword, date range for the edition)
 TOURNAMENTS = [
     ("AFCON 2021", "African Cup of Nations", "2022-01-01", "2022-06-01"),
+    ("FIFA World Cup 2022", "FIFA World Cup", "2022-11-20", "2022-12-19"),
     ("Gold Cup 2023", "Gold Cup", "2023-01-01", "2023-12-31"),
     ("AFC Asian Cup 2023", "AFC Asian Cup", "2024-01-01", "2024-06-01"),
     ("AFCON 2023", "African Cup of Nations", "2024-01-01", "2024-06-01"),
@@ -116,6 +117,13 @@ def feature_engineering_v2(df):
         0,
     )
 
+    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
+    df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
+    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
+    df["sim_gc_advantage"] = df["home_sim_gc"] - df["away_sim_gc"]
+    df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
+    df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
+
     df["year_norm"] = (df["year"] - 1950) / 80.0
 
     df["is_wc"] = df["tournament"].str.contains("FIFA World Cup", na=False).astype(int)
@@ -140,7 +148,8 @@ def feature_engineering_v2(df):
 
 
 def prepare_data(df, scaler, team_encoder, fit_scaler=False,
-                 use_draw_features=True, use_group_round=True):
+                 use_draw_features=True, use_group_round=True,
+                 use_sim_features=True, extra_features=None):
     """Prepare feature tensors."""
     feature_cols = [
         "elo_advantage_home", "elo_quality", "elo_diff_norm", "elo_ratio", "elo_gap",
@@ -149,6 +158,13 @@ def prepare_data(df, scaler, team_encoder, fit_scaler=False,
         "strength_advantage", "match_quality",
         "h2h_dominance", "has_h2h",
     ]
+    if use_sim_features:
+        feature_cols += [
+            "sim_wr_advantage", "sim_gs_advantage",
+            "sim_wr_quality", "sim_dr_quality",
+        ]
+    if extra_features:
+        feature_cols += extra_features
     if use_draw_features:
         feature_cols += [
             "draw_rate_home", "draw_rate_away", "both_draw_prone",
@@ -231,10 +247,11 @@ def evaluate(model, loader, criterion, device):
 
 def backtest_single_tournament(name, keyword, date_start, date_end, full_df,
                                use_draw_features=True, use_neutral_gating=True,
-                               use_group_round=True):
+                               use_group_round=True, use_sim_features=True,
+                               extra_features=None):
     """Run backtest for a single tournament: train on pre-tournament data,
     test on tournament group stage. Returns metrics dict or None."""
-    config_desc = f"draw={use_draw_features} neutral_gate={use_neutral_gating} group_round={use_group_round}"
+    config_desc = f"draw={use_draw_features} sim={use_sim_features} neutral_gate={use_neutral_gating} group_round={use_group_round} extra={extra_features}"
     print(f"\n{'=' * 60}")
     print(f"Backtesting: {name}  [{config_desc}]")
     print(f"{'=' * 60}")
@@ -276,11 +293,13 @@ def backtest_single_tournament(name, keyword, date_start, date_end, full_df,
     # Prepare data
     X_train, h_train, a_train, y_train, hg_train, ag_train, feature_cols, scaler = \
         prepare_data(train_df, StandardScaler(), team_encoder, fit_scaler=True,
-                     use_draw_features=use_draw_features, use_group_round=use_group_round)
+                     use_draw_features=use_draw_features, use_group_round=use_group_round,
+                     use_sim_features=use_sim_features, extra_features=extra_features)
 
     X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
         prepare_data(val_df, scaler, team_encoder,
-                     use_draw_features=use_draw_features, use_group_round=use_group_round)
+                     use_draw_features=use_draw_features, use_group_round=use_group_round,
+                     use_sim_features=use_sim_features, extra_features=extra_features)
 
     # Handle unseen teams in test
     known_teams = set(team_encoder.classes_)

@@ -84,6 +84,14 @@ def feature_engineering_v2(df):
         0,
     )
 
+    # Elo-similarity advantage features
+    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
+    df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
+    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
+    df["sim_gc_advantage"] = df["home_sim_gc"] - df["away_sim_gc"]
+    df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
+    df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
+
     # Temporal features (normalize year)
     df["year_norm"] = (df["year"] - 1950) / 80.0
 
@@ -134,6 +142,11 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False):
         # H2H
         "h2h_dominance",
         "has_h2h",
+        # Elo-similarity
+        "sim_wr_advantage",
+        "sim_gs_advantage",
+        "sim_wr_quality",
+        "sim_dr_quality",
         # Draw-specific
         "draw_rate_home",
         "draw_rate_away",

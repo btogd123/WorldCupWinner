@@ -276,6 +276,96 @@ def _calc_draw_rate(history, window):
     return draws / len(recent)
 
 
+def calculate_elo_similarity_features(df, elo_delta=75, max_matches=10):
+    """Calculate Elo-similarity per-team statistics (no home/away restriction).
+
+    For each match, finds prior matches where a team with Elo ~= current home Elo
+    faced a team with Elo ~= current away Elo, regardless of who was home.
+    Two matching modes:
+      mask1: historical home ~= current home AND historical away ~= current away
+      mask2: historical home ~= current away AND historical away ~= current home (swapped)
+
+    Stats computed from the perspective of the Elo-matched team.
+    """
+    print(f"Calculating Elo-similarity features (delta=+/-{elo_delta}, max={max_matches})...")
+    matches = df.copy()
+    N = len(matches)
+
+    new_cols = [
+        "home_sim_win_rate", "home_sim_draw_rate", "home_sim_gs", "home_sim_gc",
+        "away_sim_win_rate", "away_sim_draw_rate", "away_sim_gs", "away_sim_gc",
+    ]
+    for col in new_cols:
+        matches[col] = 0.0
+
+    home_elo = matches["home_elo"].values.astype(np.float64)
+    away_elo = matches["away_elo"].values.astype(np.float64)
+    home_score = matches["home_score"].values
+    away_score = matches["away_score"].values
+
+    has_result = pd.notna(home_score) & pd.notna(away_score)
+
+    n_matched = 0
+    for i in range(1, N):
+        h_elo_i = home_elo[i]
+        a_elo_i = away_elo[i]
+
+        h_elo_prior = home_elo[:i]
+        a_elo_prior = away_elo[:i]
+        has_res_prior = has_result[:i]
+
+        mask1 = (
+            (np.abs(h_elo_prior - h_elo_i) <= elo_delta)
+            & (np.abs(a_elo_prior - a_elo_i) <= elo_delta)
+            & has_res_prior
+        )
+        mask2 = (
+            (np.abs(h_elo_prior - a_elo_i) <= elo_delta)
+            & (np.abs(a_elo_prior - h_elo_i) <= elo_delta)
+            & has_res_prior
+        )
+
+        mask = mask1 | mask2
+        prior_idx = np.where(mask)[0]
+
+        if len(prior_idx) == 0:
+            continue
+
+        n_matched += 1
+        recent = prior_idx[-max_matches:]
+        n_rec = len(recent)
+
+        hs = home_score[recent].astype(np.float64)
+        aws = away_score[recent].astype(np.float64)
+        m1 = mask1[recent]
+        m2 = mask2[recent]
+
+        # Home perspective (team with Elo ~= current home Elo):
+        home_wins = ((m1 & (hs > aws)) | (m2 & (aws > hs))).sum()
+        home_draws = ((m1 | m2) & (hs == aws)).sum()
+        home_gs = (m1 * hs + m2 * aws).sum()
+        home_gc = (m1 * aws + m2 * hs).sum()
+
+        matches.loc[matches.index[i], "home_sim_win_rate"] = home_wins / n_rec
+        matches.loc[matches.index[i], "home_sim_draw_rate"] = home_draws / n_rec
+        matches.loc[matches.index[i], "home_sim_gs"] = home_gs / n_rec
+        matches.loc[matches.index[i], "home_sim_gc"] = home_gc / n_rec
+
+        # Away perspective (team with Elo ~= current away Elo):
+        away_wins = ((m1 & (aws > hs)) | (m2 & (hs > aws))).sum()
+        away_draws = home_draws
+        away_gs = (m1 * aws + m2 * hs).sum()
+        away_gc = (m1 * hs + m2 * aws).sum()
+
+        matches.loc[matches.index[i], "away_sim_win_rate"] = away_wins / n_rec
+        matches.loc[matches.index[i], "away_sim_draw_rate"] = away_draws / n_rec
+        matches.loc[matches.index[i], "away_sim_gs"] = away_gs / n_rec
+        matches.loc[matches.index[i], "away_sim_gc"] = away_gc / n_rec
+
+    print(f"Elo-similarity features: {n_matched}/{N} matches matched ({n_matched/N*100:.1f}%)")
+    return matches
+
+
 def calculate_h2h_features(df):
     """Calculate head-to-head features from past encounters."""
     print("Calculating head-to-head features...")
@@ -668,6 +758,14 @@ def engineer_features(df):
     )
     df["has_h2h"] = (df["h2h_count"] > 0).astype(int)
 
+    # Elo-similarity advantage features
+    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
+    df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
+    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
+    df["sim_gc_advantage"] = df["home_sim_gc"] - df["away_sim_gc"]
+    df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
+    df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
+
     # Tournament importance
     df["tournament_importance"] = df["tournament"].apply(_get_tournament_importance)
 
@@ -724,6 +822,12 @@ def prepare_dataset(df, min_date=None, max_date=None):
         "wr_advantage",
         "h2h_home_advantage",
         "has_h2h",
+        "sim_wr_advantage",
+        "sim_dr_advantage",
+        "sim_gs_advantage",
+        "sim_gc_advantage",
+        "sim_wr_quality",
+        "sim_dr_quality",
         "is_neutral",
         "tournament_importance",
         "days_since_first",
@@ -765,6 +869,9 @@ def preprocess_pipeline():
 
     # Step 4.5: Calculate group context (fighting spirit features)
     df = calculate_group_context(df)
+
+    # Step 4.6: Calculate Elo-similarity features
+    df = calculate_elo_similarity_features(df)
 
     # Step 5: Engineer features
     df = engineer_features(df)
