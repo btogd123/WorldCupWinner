@@ -92,6 +92,9 @@ def build_match_features(wc_df, team_encoder):
     # Match quality
     df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
 
+    # Draw prior: expected draw rate based on Elo difference
+    df["draw_prior"] = 0.29 * np.exp(-((df["elo_diff"]) / 430.0) ** 2) + 0.01
+
     # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
     df["draw_rate_home"] = df["home_draw_rate"]
     df["draw_rate_away"] = df["away_draw_rate"]
@@ -398,6 +401,7 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "sim_gs_advantage": 0.0,
         "sim_wr_quality": 0.0,
         "sim_dr_quality": 0.0,
+        "draw_prior": 0.29 * np.exp(-((elo_diff) / 430.0) ** 2) + 0.01,
         "draw_rate_home": 0.25,
         "draw_rate_away": 0.25,
         "both_draw_prone": 0.25,

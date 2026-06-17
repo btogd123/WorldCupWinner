@@ -84,6 +84,9 @@ def feature_engineering_v2(df):
         0,
     )
 
+    # Draw prior: expected draw rate based on Elo difference (Gaussian decay)
+    df["draw_prior"] = 0.29 * np.exp(-((df["elo_diff"]) / 430.0) ** 2) + 0.01
+
     # Elo-similarity advantage features
     df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
     df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
@@ -148,6 +151,7 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False):
         "sim_wr_quality",
         "sim_dr_quality",
         # Draw-specific
+        "draw_prior",
         "draw_rate_home",
         "draw_rate_away",
         "both_draw_prone",
