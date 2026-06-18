@@ -17,7 +17,8 @@ from config import (
     WC2026_START,
     WC2026_END,
 )
-from improved_model import create_improved_model
+from model import create_model
+from features import compute_positional_features, feature_engineering_v2, POSITIONAL_FEATURE_COLS
 
 
 def load_model_and_assets():
@@ -35,7 +36,7 @@ def load_model_and_assets():
 
     # Create model and load weights
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = create_improved_model(num_teams - 1, num_match_features=num_match_features,
+    model = create_model(num_teams - 1, num_match_features=num_match_features,
                                    device=device, is_neutral_idx=is_neutral_idx)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -48,12 +49,8 @@ def load_model_and_assets():
     return model, team_encoder, scaler, feature_cols, temperature, device
 
 
-def get_wc2026_matches():
-    """Extract 2026 World Cup matches from the dataset."""
-    df = pd.read_csv(PROCESSED_DATA_PATH)
-    df["date"] = pd.to_datetime(df["date"])
-
-    # Filter for 2026 World Cup matches
+def get_wc2026_matches(df):
+    """Extract 2026 World Cup matches from the full-featured dataset."""
     wc_mask = (
         (df["date"] >= pd.to_datetime(WC2026_START))
         & (df["date"] <= pd.to_datetime(WC2026_END))
@@ -67,73 +64,27 @@ def get_wc2026_matches():
     return wc_df
 
 
-def build_match_features(wc_df, team_encoder):
-    """Build features for WC 2026 matches using the same logic as training."""
-    df = wc_df.copy()
-
-    # Use the pre-computed Elo and form features from processed data
-    # These were computed using historical data up to each match date
-
-    # Elo features
-    df["elo_diff_norm"] = df["elo_diff"] / 400.0
-    df["elo_ratio"] = (df["home_elo"] / df["away_elo"].clip(lower=1000)) - 1.0
-    df["elo_gap"] = abs(df["elo_diff"]) / 400.0
-
-    # Goal difference
-    df["home_goal_diff_avg"] = df["home_goals_scored_avg"] - df["home_goals_conceded_avg"]
-    df["away_goal_diff_avg"] = df["away_goals_scored_avg"] - df["away_goals_conceded_avg"]
-    df["goal_diff_advantage"] = df["home_goal_diff_avg"] - df["away_goal_diff_avg"]
-
-    # Strength
-    df["home_strength"] = df["home_elo"] / 1500.0 + df["home_win_rate"] * 0.5 + df["home_form"] * 0.3
-    df["away_strength"] = df["away_elo"] / 1500.0 + df["away_win_rate"] * 0.5 + df["away_form"] * 0.3
-    df["strength_advantage"] = df["home_strength"] - df["away_strength"]
-
-    # Match quality
-    df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
-
-    # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
-    df["draw_rate_home"] = df["home_draw_rate"]
-    df["draw_rate_away"] = df["away_draw_rate"]
-    df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
-    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
-    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
-    df["low_scoring_tendency"] = (
-        (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
-        & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
-    ).astype(float)
-
-    # H2H
-    df["h2h_dominance"] = np.where(
-        df["h2h_count"] >= 3,
-        (df["h2h_home_wins"] - df["h2h_away_wins"]) / df["h2h_count"],
-        0,
-    )
-
-    # Year
-    df["year_norm"] = (df["year"] - 1950) / 80.0
-
-    # Tournament indicators
-    df["is_wc"] = 1
-    df["is_wcq"] = 0
-    df["is_friendly"] = 0
-    df["is_continental"] = 0
-
-    # Neutral venue - World Cup matches are all neutral
-    # But some might be hosted by a participating team (like USA)
-    df["is_neutral"] = df["neutral"].astype(int)
-
-    # Team IDs
-    df["home_team_id"] = team_encoder.transform(df["home_team"])
-    df["away_team_id"] = team_encoder.transform(df["away_team"])
-
-    return df
+def _positional_default(col):
+    """Return neutral default for a positional feature when no history is available."""
+    defaults = {
+        "home_att_vs_away_def": 1.0,
+        "away_att_vs_home_def": 1.0,
+        "attack_balance": 0.0,
+        "scoring_potential": 1.0,
+        "defensive_strength": 1.0,
+        "mismatch_flag": 0.0,
+    }
+    return defaults.get(col, 0.0)
 
 
 def prepare_wc_features(df, scaler, feature_cols):
     """Prepare feature tensors for WC matches."""
     X = df[feature_cols].fillna(0).values.astype(np.float32)
     X = scaler.transform(X)
+
+    # Keep is_neutral as raw binary (0/1) — scaling breaks neutral-venue gating
+    is_neutral_idx = feature_cols.index("is_neutral")
+    X[:, is_neutral_idx] = df["is_neutral"].fillna(0).values.astype(np.float32)
 
     home_ids = df["home_team_id"].values.astype(np.int64) + 1
     away_ids = df["away_team_id"].values.astype(np.int64) + 1
@@ -170,9 +121,25 @@ def predict_all_wc_matches():
 
     # Load assets
     model, team_encoder, scaler, feature_cols, temperature, device = load_model_and_assets()
+    print(f"Model expects {len(feature_cols)} features")
+
+    # Load full dataset and compute positional + engineered features
+    print("\nLoading full dataset for feature computation...")
+    df = pd.read_csv(PROCESSED_DATA_PATH)
+    df["date"] = pd.to_datetime(df["date"])
+
+    print("Computing positional strength features...")
+    df = compute_positional_features(df)
+
+    print("Engineering features...")
+    df = feature_engineering_v2(df)
+
+    # Encode team IDs for WC matches
+    df["home_team_id"] = team_encoder.transform(df["home_team"])
+    df["away_team_id"] = team_encoder.transform(df["away_team"])
 
     # Get WC 2026 matches
-    wc_df = get_wc2026_matches()
+    wc_df = get_wc2026_matches(df)
 
     if len(wc_df) == 0:
         print("No WC 2026 matches found. Creating from tournament schedule...")
@@ -180,9 +147,16 @@ def predict_all_wc_matches():
         if wc_df is None:
             print("Cannot create schedule. Exiting.")
             return
-
-    # Build features
-    wc_df = build_match_features(wc_df, team_encoder)
+        # Compute minimal features for synthetic schedule
+        wc_df["home_team_id"] = team_encoder.transform(wc_df["home_team"])
+        wc_df["away_team_id"] = team_encoder.transform(wc_df["away_team"])
+        # Use feature_engineering_v2 on the synthetic schedule for basic features
+        # (positional features will be filled with defaults since we have no history)
+        for col in POSITIONAL_FEATURE_COLS:
+            if col not in wc_df.columns:
+                wc_df[col] = _positional_default(col)
+        # Run feature engineering for remaining columns
+        wc_df = feature_engineering_v2(wc_df)
 
     # Prepare tensors
     X_t, h_t, a_t = prepare_wc_features(wc_df, scaler, feature_cols)
@@ -404,6 +378,14 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "strength_parity": 1.0 / (1.0 + abs(elo_diff) / 100.0),
         "defensive_similarity": 1.0,
         "low_scoring_tendency": 0.0,
+        # Positional strength (defaults: no info → balanced)
+        "home_att_vs_away_def": 1.0,
+        "away_att_vs_home_def": 1.0,
+        "attack_balance": 0.0,
+        "scoring_potential": 1.0,
+        "defensive_strength": 1.0,
+        "mismatch_flag": 0.0,
+        # Context
         "is_neutral": 1 if is_neutral else 0,
         "year_norm": (2026 - 1950) / 80.0,
         "is_wc": 1,
@@ -414,6 +396,10 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
 
     X = np.array([[feature_dict[col] for col in feature_cols]], dtype=np.float32)
     X = scaler.transform(X)
+
+    # Keep is_neutral as raw binary (0/1) — scaling breaks neutral-venue gating
+    is_neutral_idx = feature_cols.index("is_neutral")
+    X[:, is_neutral_idx] = 1.0 if is_neutral else 0.0
 
     home_id = team_encoder.transform([home_team])[0] + 1
     away_id = team_encoder.transform([away_team])[0] + 1

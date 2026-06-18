@@ -6,10 +6,10 @@ Build a deep learning model to predict 2026 FIFA World Cup match winners. The mo
 
 ## Quick Context
 
-- **Current best model**: `ImprovedMatchPredictor` (PyTorch NN with Attention)
+- **Current best model**: `TeamAttentionNet` (PyTorch NN with Attention)
 - **Performance**: 58.8% accuracy on 1,021 World Cup qualifiers (53.6% F1), 53.9% overall test
 - **Production config**: Config C — draw-specific features (6) + neutral venue gating; no `group_round`
-- **Training seed**: 99 (reproducible — set in `train_improved.py`)
+- **Training seed**: 99 (reproducible — set in `train.py`)
 - **Top Elo teams**: Spain (2235), Argentina (2203), France (2148), England (2103), Brazil (2087)
 - **Pi-Rating experiment**: Tested and abandoned — regressed vs Elo baseline (WCQ 59.2% vs 62.0%)
 - **Draw-specific features**: Implemented (Hvattum 2017) — 6 features from literature review
@@ -55,10 +55,9 @@ D:/WorldCupWinner/
     ├── __init__.py                    ← Package marker
     ├── config.py                      ← All paths, hyperparameters, constants
     ├── data_processor.py              ← Data pipeline: load → Elo → form → H2H → save
-    ├── improved_model.py              ← NN architecture (ImprovedMatchPredictor)
-    ├── train_improved.py              ← Training script for NN
+    ├── model.py                       ← NN architecture (TeamAttentionNet + MultiTaskLoss)
+    ├── train.py              ← Training script for NN
     ├── predict_wc2026.py              ← Predict WC 2026 group matches
-    ├── tournament_sim.py              ← Full 48-team tournament simulation
     ├── betting.py                     ← EV analysis + Kelly criterion
     └── generate_report.py            ← Final report generator
 ```
@@ -70,13 +69,10 @@ D:/WorldCupWinner/
 uv sync
 
 # Train the model (takes ~10min on GPU)
-PYTHONPATH=D:/WorldCupWinner uv run python src/train_improved.py
+PYTHONPATH=D:/WorldCupWinner uv run python src/train.py
 
 # Predict all WC 2026 matches
 PYTHONPATH=D:/WorldCupWinner PYTHONIOENCODING=utf-8 uv run python src/predict_wc2026.py
-
-# Simulate full tournament (group + knockout)
-PYTHONPATH=D:/WorldCupWinner PYTHONIOENCODING=utf-8 uv run python src/tournament_sim.py
 
 # Betting analysis (single match)
 PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --match "France" "Brazil" 2.50 3.20 2.80
@@ -89,24 +85,24 @@ PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --all
 
 ## Model Architecture
 
-### ImprovedMatchPredictor (460K params)
+### TeamAttentionNet (460K params)
 ```
 Inputs:
   ├── Home Team ID → Embedding(64-dim) + Home Indicator (gated by is_neutral)
   ├── Away Team ID → Embedding(64-dim) + Away Indicator (gated by is_neutral)
-  └── Match Features (27-dim) → Encoder(128-dim)
+  └── Match Features (37-dim) → Encoder(128-dim)
 
 Team Interaction: Multi-Head Self-Attention (4 heads)
   → Home + Away embeddings attend to each other
 
-Combined (64+64+128=256-dim) → DenseBlock(256) → DenseBlock(256) → DenseBlock(128)
+Combined (64+64+128=256-dim) → ResidualBlock(256) → ResidualBlock(256) → ResidualBlock(128)
 
 Outputs:
   ├── Classification Head: 128→64→32→3 (Away/Draw/Home, CrossEntropyLoss)
   └── Goal Prediction Head: 128→64→2 (Home goals, Away goals, MSE auxiliary)
 ```
 
-### Features (27-dimensional)
+### Features (37-dimensional)
 | Category | Features | Source |
 |----------|----------|--------|
 | Elo (5) | elo_advantage_home, elo_quality, elo_diff_norm, elo_ratio, elo_gap | Dynamic Elo calculation |
@@ -115,6 +111,7 @@ Outputs:
 | Strength (2) | strength_advantage, match_quality | Elo + form composite |
 | H2H (2) | h2h_dominance, has_h2h | Historical matchup lookup |
 | Draw (6) | draw_rate_home, draw_rate_away, both_draw_prone, strength_parity, defensive_similarity, low_scoring_tendency | Hvattum 2017 — Config C |
+| Positional (6) | home_att_vs_away_def, away_att_vs_home_def, attack_balance, scoring_potential, defensive_strength, mismatch_flag | Iterative opponent-corrected atk/def |
 | Context (6) | is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly | Match metadata — `group_round` removed |
 
 ### Training Config
@@ -122,7 +119,7 @@ Outputs:
 - Val: 2,025 matches (2022-2023)
 - Test: 2,544 matches (2024-2026.6), including 1,021 WCQ
 - Optimizer: AdamW (lr=0.001), CosineAnnealingWarmRestarts (T_0=30, T_mult=2)
-- Loss: CrossEntropyLoss(class_weights) + 0.15 × MSE(goals)
+- Loss: CrossEntropyLoss (unweighted) + 0.15 × MSE(goals)
 - Early stopping: patience=25 on val F1
 - Batch size: 64
 
@@ -149,13 +146,13 @@ The `home_elo` column in processed_matches.csv is the Elo BEFORE that match. The
 ## Previous Iterations (What We Tried)
 
 ### Attempt 1: Basic NN
-- File: `src/model.py` (DELETED — superseded)
+- File: `src/basic_nn.py` (DELETED — superseded by current architecture)
 - 14 features, simple ResidualBlock architecture
 - Bug: NaN scores corrupted Elo calculation
 - Result: 43% accuracy
 
 ### Attempt 2: Improved NN (CURRENT — Config C)
-- Files: `src/improved_model.py`, `src/train_improved.py`
+- Files: `src/model.py`, `src/train.py`
 - 27 features, Attention, CrossEntropyLoss, Multi-task, neutral venue gating
 - Draw-specific features (Hvattum 2017), `group_round` removed after ablation showed harm
 - Elo bug fixed
@@ -207,9 +204,8 @@ From `docs/literature_review.md`, ranked by ROI:
 ```
 data/results.csv
   → src/data_processor.py → data/processed_matches.csv + data/elo_ratings.csv
-    → src/train_improved.py → models/match_predictor.pt (+ scaler, encoder)
+    → src/train.py → models/match_predictor.pt (+ scaler, encoder)
       → src/predict_wc2026.py → results/wc2026_predictions.json
-      → src/tournament_sim.py → results/tournament_simulation.json
       → src/betting.py → results/betting_analysis.json
 ```
 

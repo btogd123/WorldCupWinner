@@ -12,20 +12,21 @@ import json
 import os
 from datetime import datetime
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from config import (
     PROCESSED_DATA_PATH,
     MODEL_PATH,
-    SCALER_PATH,
     TEAM_ENCODER_PATH,
     BATCH_SIZE,
     LEARNING_RATE,
     RESULTS_DIR,
     IMPORTANT_TOURNAMENTS,
 )
-from improved_model import create_improved_model, ImprovedLoss
+from model import create_model, MultiTaskLoss
 from calibration import TemperatureScaler
+from features import FEATURE_COLS, POSITIONAL_FEATURE_COLS, compute_positional_features, feature_engineering_v2
+from preprocessing import prepare_enhanced_data, split_data_improved
+from evaluation import compute_metrics
 
 
 def load_and_prepare_data():
@@ -34,193 +35,10 @@ def load_and_prepare_data():
     df = pd.read_csv(PROCESSED_DATA_PATH)
     df["date"] = pd.to_datetime(df["date"])
 
-    with open(SCALER_PATH, "rb") as f:
-        scaler = pickle.load(f)
     with open(TEAM_ENCODER_PATH, "rb") as f:
         team_encoder = pickle.load(f)
 
-    return df, scaler, team_encoder
-
-
-def feature_engineering_v2(df):
-    """Enhanced feature engineering."""
-    print("Engineering enhanced features...")
-    df = df.copy()
-
-    # Basic Elo features
-    df["elo_diff_norm"] = df["elo_diff"] / 400.0
-    df["elo_ratio"] = (df["home_elo"] / df["away_elo"].clip(lower=1000)) - 1.0
-    df["elo_gap"] = abs(df["elo_diff"]) / 400.0
-
-    # Goal difference-based features
-    df["home_goal_diff_avg"] = df["home_goals_scored_avg"] - df["home_goals_conceded_avg"]
-    df["away_goal_diff_avg"] = df["away_goals_scored_avg"] - df["away_goals_conceded_avg"]
-    df["goal_diff_advantage"] = df["home_goal_diff_avg"] - df["away_goal_diff_avg"]
-
-    # Combined strength score
-    df["home_strength"] = df["home_elo"] / 1500.0 + df["home_win_rate"] * 0.5 + df["home_form"] * 0.3
-    df["away_strength"] = df["away_elo"] / 1500.0 + df["away_win_rate"] * 0.5 + df["away_form"] * 0.3
-    df["strength_advantage"] = df["home_strength"] - df["away_strength"]
-
-    # Match quality / competitiveness
-    df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
-
-    # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
-    df["draw_rate_home"] = df["home_draw_rate"]
-    df["draw_rate_away"] = df["away_draw_rate"]
-    df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
-    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
-    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
-    df["low_scoring_tendency"] = (
-        (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
-        & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
-    ).astype(float)
-
-    # H2H enhanced
-    df["h2h_dominance"] = np.where(
-        df["h2h_count"] >= 3,
-        (df["h2h_home_wins"] - df["h2h_away_wins"]) / df["h2h_count"],
-        0,
-    )
-
-    # Elo-similarity advantage features
-    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
-    df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
-    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
-    df["sim_gc_advantage"] = df["home_sim_gc"] - df["away_sim_gc"]
-    df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
-    df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
-
-    # Temporal features (normalize year)
-    df["year_norm"] = (df["year"] - 1950) / 80.0
-
-    # Tournament type encoding
-    df["is_wc"] = df["tournament"].str.contains("FIFA World Cup", na=False).astype(int)
-    df["is_wcq"] = df["tournament"].str.contains("qualification", na=False).astype(int)
-    df["is_friendly"] = df["tournament"].str.contains("Friendly", na=False).astype(int)
-    df["is_continental"] = (
-        df["tournament"].str.contains(
-            "UEFA Euro|Copa Am|African Cup|Asian Cup|Gold Cup|Nations League",
-            na=False,
-        )
-    ).astype(int)
-
-    # Neutral venue
-    df["is_neutral"] = df["neutral"].astype(int)
-
-    # Target
-    df["result"] = np.where(
-        df["home_score"] > df["away_score"],
-        2,
-        np.where(df["home_score"] == df["away_score"], 1, 0),
-    )
-
-    return df
-
-
-def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False):
-    """Prepare enhanced feature tensors."""
-    feature_cols = [
-        # Elo-based
-        "elo_advantage_home",
-        "elo_quality",
-        "elo_diff_norm",
-        "elo_ratio",
-        "elo_gap",
-        # Form-based
-        "form_advantage",
-        "form_quality",
-        "wr_advantage",
-        # Goal-based
-        "gs_advantage",
-        "gc_advantage",
-        "goal_diff_advantage",
-        # Strength
-        "strength_advantage",
-        "match_quality",
-        # H2H
-        "h2h_dominance",
-        "has_h2h",
-        # Elo-similarity
-        "sim_wr_advantage",
-        "sim_gs_advantage",
-        "sim_wr_quality",
-        "sim_dr_quality",
-        # Draw-specific
-        "draw_rate_home",
-        "draw_rate_away",
-        "both_draw_prone",
-        "strength_parity",
-        "defensive_similarity",
-        "low_scoring_tendency",
-        # Context
-        "is_neutral",
-        "year_norm",
-        "is_wc",
-        "is_wcq",
-        "is_continental",
-        "is_friendly",
-    ]
-
-    X = df[feature_cols].fillna(0).values.astype(np.float32)
-
-    if fit_scaler:
-        scaler = StandardScaler()
-        X = scaler.fit_transform(X)
-    else:
-        X = scaler.transform(X)
-
-    home_ids = df["home_team_id"].values.astype(np.int64) + 1
-    away_ids = df["away_team_id"].values.astype(np.int64) + 1
-    y = df["result"].values.astype(np.int64)
-    home_goals = df["home_score"].values.astype(np.float32)
-    away_goals = df["away_score"].values.astype(np.float32)
-
-    if fit_scaler:
-        return X, home_ids, away_ids, y, home_goals, away_goals, feature_cols, scaler
-    return X, home_ids, away_ids, y, home_goals, away_goals, feature_cols, None
-
-
-def split_data_improved(df, train_end="2021-12-31", val_end="2023-12-31", val_start=None):
-    """Split data chronologically with better filtering.
-
-    Plan C (deployment): train_end="2025-07-01", val_start="2026-01-01", val_end="2026-06-16"
-    Train = [2000-01-01, 2025-06-30] U [2026-01-01, 2026-06-16] (includes played WC)
-    Val   = [2025-07-01, 2025-12-31]
-    """
-    df = df[df["date"] >= pd.to_datetime("2000-01-01")]
-    df = df[df["date"] <= pd.to_datetime("2026-06-16")]
-    df = df.dropna(subset=["home_score", "away_score"])
-
-    if val_start is not None:
-        # Gap split: train has two blocks with a val gap in between
-        train_before = df[df["date"] < pd.to_datetime(train_end)]
-        train_after = df[
-            (df["date"] >= pd.to_datetime(val_start))
-            & (df["date"] < pd.to_datetime(val_end))
-        ]
-        train = pd.concat([train_before, train_after])
-        val = df[
-            (df["date"] >= pd.to_datetime(train_end))
-            & (df["date"] < pd.to_datetime(val_start))
-        ]
-    else:
-        train = df[df["date"] < pd.to_datetime(train_end)]
-        val = df[
-            (df["date"] >= pd.to_datetime(train_end))
-            & (df["date"] < pd.to_datetime(val_end))
-        ]
-
-    test = df[df["date"] >= pd.to_datetime(val_end)]
-
-    print(f"\nSplit: Train={len(train)} ({train['date'].min().date()} to {train['date'].max().date()})")
-    print(f"       Val={len(val)}   ({val['date'].min().date()} to {val['date'].max().date()})")
-    print(f"       Test={len(test)}  ({test['date'].min().date()} to {test['date'].max().date()})")
-
-    wcq = test[test["tournament"].str.contains("qualification", na=False)]
-    print(f"       WCQ in test: {len(wcq)}")
-
-    return train, val, test
+    return df, team_encoder
 
 
 def train_epoch_improved(model, loader, optimizer, criterion, device):
@@ -314,7 +132,11 @@ def train_improved():
     print("=" * 60)
 
     # Load data
-    df, _, team_encoder = load_and_prepare_data()
+    df, team_encoder = load_and_prepare_data()
+
+    # Compute positional strength features (attack/defense decomposition)
+    print("\n--- Computing Positional Strength Features ---")
+    df = compute_positional_features(df)
 
     # Enhanced feature engineering
     df = feature_engineering_v2(df)
@@ -370,10 +192,10 @@ def train_improved():
 
     # Model
     num_teams = len(team_encoder.classes_)
-    model = create_improved_model(num_teams, num_match_features=len(feature_cols), device=device, is_neutral_idx=is_neutral_idx)
+    model = create_model(num_teams, num_match_features=len(feature_cols), device=device, is_neutral_idx=is_neutral_idx)
 
     # Loss: plain CE, no class weights (backtest: +6pp Acc, -11% Brier vs weighted)
-    criterion = ImprovedLoss(loss_type="ce", goal_weight=0.15)
+    criterion = MultiTaskLoss(loss_type="ce", goal_weight=0.15)
     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=30, T_mult=2, eta_min=1e-6
@@ -543,8 +365,8 @@ def train_improved():
             model.eval()
             with torch.no_grad():
                 X_t = torch.FloatTensor(X_wcq).to(device)
-                h_t = torch.LongTensor(h_wcq + 1).to(device)
-                a_t = torch.LongTensor(a_wcq + 1).to(device)
+                h_t = torch.LongTensor(h_wcq).to(device)
+                a_t = torch.LongTensor(a_wcq).to(device)
                 y_t = torch.LongTensor(y_wcq).to(device)
                 logits = model(h_t, a_t, X_t)
                 wcq_preds = torch.argmax(logits, dim=1).cpu().numpy()

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class TeamAttentionBlock(nn.Module):
+class TransformerBlock(nn.Module):
     """Self-attention block for team feature interactions."""
 
     def __init__(self, embed_dim, num_heads=4):
@@ -31,7 +31,7 @@ class TeamAttentionBlock(nn.Module):
         return x
 
 
-class ImprovedMatchPredictor(nn.Module):
+class TeamAttentionNet(nn.Module):
     """
     Improved neural network for match outcome prediction.
 
@@ -50,11 +50,13 @@ class ImprovedMatchPredictor(nn.Module):
         dropout_rate: float = 0.25,
         is_neutral_idx: int = 21,
         use_neutral_gating: bool = True,
+        use_neutral_learnable: bool = False,
     ):
         super().__init__()
 
         self.is_neutral_idx = is_neutral_idx
         self.use_neutral_gating = use_neutral_gating
+        self.use_neutral_learnable = use_neutral_learnable
 
         # Team embeddings - richer representation
         self.team_embedding = nn.Embedding(num_teams, team_embedding_dim, padding_idx=0)
@@ -64,8 +66,14 @@ class ImprovedMatchPredictor(nn.Module):
         self.home_indicator = nn.Parameter(torch.randn(1, team_embedding_dim) * 0.1)
         self.away_indicator = nn.Parameter(torch.randn(1, team_embedding_dim) * 0.1)
 
+        # Learnable neutral-venue indicators: model learns how much directional
+        # bias the "designated home" team carries on neutral ground.
+        if use_neutral_learnable:
+            self.neutral_home_ind = nn.Parameter(torch.randn(1, team_embedding_dim) * 0.05)
+            self.neutral_away_ind = nn.Parameter(torch.randn(1, team_embedding_dim) * 0.05)
+
         # Team interaction attention
-        self.team_attention = TeamAttentionBlock(team_embedding_dim, num_heads=4)
+        self.team_attention = TransformerBlock(team_embedding_dim, num_heads=4)
 
         # Match feature processing
         self.match_encoder = nn.Sequential(
@@ -83,9 +91,9 @@ class ImprovedMatchPredictor(nn.Module):
         combined_dim = team_embedding_dim * 2 + 128
 
         self.shared = nn.Sequential(
-            DenseBlock(combined_dim, 256, dropout_rate),
-            DenseBlock(256, 256, dropout_rate),
-            DenseBlock(256, 128, dropout_rate),
+            ResidualBlock(combined_dim, 256, dropout_rate),
+            ResidualBlock(256, 256, dropout_rate),
+            ResidualBlock(256, 128, dropout_rate),
         )
 
         # Main classification head
@@ -136,8 +144,12 @@ class ImprovedMatchPredictor(nn.Module):
         # Gate home/away indicators on neutral venue: zero out directional bias for neutral matches
         is_neutral = match_features[:, self.is_neutral_idx:self.is_neutral_idx + 1]
 
-        # Get team embeddings with strength bias
-        if self.use_neutral_gating:
+        if self.use_neutral_learnable:
+            home_ind = self.home_indicator * (1 - is_neutral) + self.neutral_home_ind * is_neutral
+            away_ind = self.away_indicator * (1 - is_neutral) + self.neutral_away_ind * is_neutral
+            home_emb = self.team_embedding(home_team_ids) + home_ind
+            away_emb = self.team_embedding(away_team_ids) + away_ind
+        elif self.use_neutral_gating:
             home_emb = self.team_embedding(home_team_ids) + self.home_indicator * (1 - is_neutral)
             away_emb = self.team_embedding(away_team_ids) + self.away_indicator * (1 - is_neutral)
         else:
@@ -181,7 +193,7 @@ class ImprovedMatchPredictor(nn.Module):
         return probs
 
 
-class DenseBlock(nn.Module):
+class ResidualBlock(nn.Module):
     """Dense-style residual block."""
 
     def __init__(self, in_dim, out_dim, dropout_rate=0.3):
@@ -208,74 +220,62 @@ class DenseBlock(nn.Module):
         return out + residual
 
 
-class FocalLoss(nn.Module):
-    """Focal Loss for classification: FL(p_t) = -(1-p_t)^gamma * log(p_t).
+class MultiTaskLoss(nn.Module):
+    """Combined loss: classification + auxiliary goal prediction."""
 
-    Solves cross-entropy's asymmetry where one confident wrong prediction
-    (-log(0.02)=3.9) costs 78x a confident correct one (-log(0.95)=0.05).
-    With gamma=2, hedging (p=0.6, loss=0.082) costs 630x more than being
-    confident & correct (p=0.95, loss=0.00013). The model is strongly
-    incentivized to make decisive predictions on clear matches.
-    """
-
-    def __init__(self, gamma=2.0, weight=None, reduction="mean"):
-        super().__init__()
-        self.gamma = gamma
-        self.weight = weight
-        self.reduction = reduction
-
-    def forward(self, logits, targets):
-        ce = F.cross_entropy(logits, targets, weight=self.weight, reduction="none")
-        pt = torch.exp(-ce)  # p_t for the true class
-        focal = (1 - pt) ** self.gamma * ce
-
-        if self.reduction == "mean":
-            return focal.mean()
-        elif self.reduction == "sum":
-            return focal.sum()
-        return focal
-
-
-class ImprovedLoss(nn.Module):
-    """Combined loss: classification + auxiliary goal prediction.
-
-    Supports both standard cross-entropy and focal loss.
-    """
-
-    def __init__(self, class_weights=None, goal_weight=0.1, loss_type="ce", gamma=2.0):
+    def __init__(self, class_weights=None, goal_weight=0.1, loss_type="ce",
+                 label_smoothing=0.0, conf_penalty_weight=0.0):
         super().__init__()
         self.class_weights = class_weights
         self.goal_weight = goal_weight
         self.loss_type = loss_type
-        self.focal = FocalLoss(gamma=gamma, weight=class_weights) if loss_type == "focal" else None
+        self.label_smoothing = label_smoothing
+        self.conf_penalty_weight = conf_penalty_weight
 
     def forward(self, logits, goals, targets, home_goals, away_goals, sample_weights=None):
-        if self.loss_type == "focal":
-            cls_loss = self.focal(logits, targets)
-        else:
-            cls_loss = F.cross_entropy(
-                logits, targets, weight=self.class_weights, reduction="none"
-            )
+        probs = F.softmax(logits, dim=1)
+
+        if self.loss_type == "brier":
+            y_onehot = F.one_hot(targets, num_classes=3).float()
+            cls_loss = ((probs - y_onehot) ** 2).sum(dim=1)
+            if sample_weights is not None:
+                cls_loss = (cls_loss * sample_weights).mean()
+            else:
+                cls_loss = cls_loss.mean()
+        else:  # ce
+            kwargs = {"weight": self.class_weights, "reduction": "none"}
+            if self.label_smoothing > 0:
+                kwargs["label_smoothing"] = self.label_smoothing
+            cls_loss = F.cross_entropy(logits, targets, **kwargs)
             if sample_weights is not None:
                 cls_loss = (cls_loss * sample_weights).mean()
             else:
                 cls_loss = cls_loss.mean()
 
+        # Confidence penalty: penalize low entropy (overconfidence).
+        # L = cls_loss - lambda * H(p) — maximizing entropy spreads probabilities.
+        conf_penalty = torch.tensor(0.0, device=logits.device)
+        if self.conf_penalty_weight > 0:
+            log_probs = torch.log(probs + 1e-9)
+            entropy = -(probs * log_probs).sum(dim=1).mean()
+            conf_penalty = -self.conf_penalty_weight * entropy
+
         goal_targets = torch.stack([home_goals, away_goals], dim=1).float()
         goal_loss = F.mse_loss(goals, goal_targets)
 
-        return cls_loss + self.goal_weight * goal_loss, cls_loss, goal_loss
+        return cls_loss + self.goal_weight * goal_loss + conf_penalty, cls_loss, goal_loss
 
 
-def create_improved_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, use_neutral_gating=True):
+def create_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, use_neutral_gating=True, use_neutral_learnable=False):
     """Create the improved model."""
-    model = ImprovedMatchPredictor(
+    model = TeamAttentionNet(
         num_teams=num_teams + 1,
         team_embedding_dim=64,
         num_match_features=num_match_features,
         dropout_rate=0.25,
         is_neutral_idx=is_neutral_idx,
         use_neutral_gating=use_neutral_gating,
+        use_neutral_learnable=use_neutral_learnable,
     )
 
     if device:

@@ -4,7 +4,7 @@ Data processing pipeline: Elo ratings, feature engineering, and dataset preparat
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import LabelEncoder
 import pickle
 import warnings
 
@@ -14,7 +14,6 @@ from config import (
     RAW_RESULTS_PATH,
     PROCESSED_DATA_PATH,
     ELO_RATINGS_PATH,
-    SCALER_PATH,
     TEAM_ENCODER_PATH,
     ELO_K_FACTOR,
     ELO_HOME_ADVANTAGE,
@@ -795,50 +794,6 @@ def _get_tournament_importance(tournament):
         return 1
 
 
-def create_target_labels(df):
-    """Create target labels for classification."""
-    # result column already created in engineer_features
-    return df
-
-
-def prepare_dataset(df, min_date=None, max_date=None):
-    """
-    Prepare the final dataset for model training.
-    Returns feature matrix X and target vector y.
-    """
-    if min_date:
-        df = df[df["date"] >= min_date]
-    if max_date:
-        df = df[df["date"] <= max_date]
-
-    # Select feature columns
-    feature_cols = [
-        "elo_advantage_home",
-        "elo_quality",
-        "form_advantage",
-        "form_quality",
-        "gs_advantage",
-        "gc_advantage",
-        "wr_advantage",
-        "h2h_home_advantage",
-        "has_h2h",
-        "sim_wr_advantage",
-        "sim_dr_advantage",
-        "sim_gs_advantage",
-        "sim_gc_advantage",
-        "sim_wr_quality",
-        "sim_dr_quality",
-        "is_neutral",
-        "tournament_importance",
-        "days_since_first",
-        "year",
-        "month",
-    ]
-
-    X = df[feature_cols].values.astype(np.float32)
-    y = df["result"].values.astype(np.int64)
-
-    return X, y, feature_cols, df
 
 
 def preprocess_pipeline():
@@ -888,27 +843,22 @@ def preprocess_pipeline():
     with open(TEAM_ENCODER_PATH, "wb") as f:
         pickle.dump(team_encoder, f)
 
-    # Step 7: Fit scaler on features
-    X, y, feature_cols, _ = prepare_dataset(df)
-    scaler = StandardScaler()
-    scaler.fit(X)
-
-    with open(SCALER_PATH, "wb") as f:
-        pickle.dump(scaler, f)
-
-    # Step 8: Save processed data
+    # Step 7: Save processed data
     df.to_csv(PROCESSED_DATA_PATH, index=False)
 
+    home_wins = (df["result"] == 2).sum()
+    draws = (df["result"] == 1).sum()
+    away_wins = (df["result"] == 0).sum()
+    n = len(df)
     print(f"\nProcessed data saved to {PROCESSED_DATA_PATH}")
-    print(f"Total samples: {len(df)}")
-    print(f"Features: {feature_cols}")
+    print(f"Total samples: {n}")
     print(
-        f"Label distribution: Home Win={sum(y==2)} ({sum(y==2)/len(y)*100:.1f}%), "
-        f"Draw={sum(y==1)} ({sum(y==1)/len(y)*100:.1f}%), "
-        f"Away Win={sum(y==0)} ({sum(y==0)/len(y)*100:.1f}%)"
+        f"Label distribution: Home Win={home_wins} ({home_wins/n*100:.1f}%), "
+        f"Draw={draws} ({draws/n*100:.1f}%), "
+        f"Away Win={away_wins} ({away_wins/n*100:.1f}%)"
     )
 
-    return df, scaler, team_encoder
+    return df, team_encoder
 
 
 if __name__ == "__main__":
