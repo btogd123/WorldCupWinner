@@ -226,3 +226,107 @@ def run_backtest(
         "temperature": float(temperature),
         "best_state_dict": best_state,
     }
+
+
+if __name__ == "__main__":
+    import pandas as pd
+    import pickle
+
+    from config import PROCESSED_DATA_PATH, TEAM_ENCODER_PATH
+    from features import NON_POSITIONAL_FEATURE_COLS, feature_engineering_v2
+    from preprocessing import split_data_improved, prepare_enhanced_data
+    from model import create_model
+
+    print("=" * 60)
+    print("WC 2022 Backtest")
+    print("=" * 60)
+
+    # 1. Load data
+    df = pd.read_csv(PROCESSED_DATA_PATH)
+    df["date"] = pd.to_datetime(df["date"])
+
+    with open(TEAM_ENCODER_PATH, "rb") as f:
+        team_encoder = pickle.load(f)
+
+    # 2. Compute features (no positional — hurt WC 2022 neutral-venue backtest)
+    df = feature_engineering_v2(df)
+
+    # 3. Chronological split: train before 2022, val Jan–Nov 2022, test after
+    # train_end="2022-01-01" is critical — extending into 2022 shrinks val
+    # (863→535) and causes noisy early stopping that kills draw predictions
+    train_df, val_df, test_df = split_data_improved(
+        df, train_end="2022-01-01", val_end="2022-11-20"
+    )
+
+    # 4. Prepare tensors
+    X_train, h_train, a_train, y_train, hg_train, ag_train, feature_cols, scaler = \
+        prepare_enhanced_data(train_df, None, team_encoder, fit_scaler=True,
+                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
+    X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
+        prepare_enhanced_data(val_df, scaler, team_encoder,
+                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
+    X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = \
+        prepare_enhanced_data(test_df, scaler, team_encoder,
+                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
+
+    # 5. Filter test to WC 2022 matches
+    wc_mask = (
+        test_df["tournament"].str.contains("FIFA World Cup", na=False)
+        & ~test_df["tournament"].str.contains("qualification", na=False)
+        & (test_df["date"] >= pd.to_datetime("2022-11-20"))
+        & (test_df["date"] <= pd.to_datetime("2022-12-18"))
+    )
+    wc_indices = np.where(wc_mask.values)[0]
+    wc_test_df = test_df[wc_mask].reset_index(drop=True)
+
+    print(f"WC 2022 matches in test window: {len(wc_test_df)}")
+
+    X_wc, h_wc, a_wc = X_test[wc_indices], h_test[wc_indices], a_test[wc_indices]
+    y_wc, hg_wc, ag_wc = y_test[wc_indices], hg_test[wc_indices], ag_test[wc_indices]
+
+    # 6. Run backtest
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    is_neutral_idx = feature_cols.index("is_neutral")
+    num_teams = len(team_encoder.classes_)
+
+    def model_factory(num_teams, num_match_features, device, is_neutral_idx):
+        return create_model(num_teams, num_match_features, device, is_neutral_idx)
+
+    config = BacktestConfig()
+
+    result = run_backtest(
+        model_factory=model_factory,
+        train_data=(X_train, h_train, a_train, y_train, hg_train, ag_train),
+        val_data=(X_val, h_val, a_val, y_val, hg_val, ag_val),
+        test_data=(X_wc, h_wc, a_wc, y_wc, hg_wc, ag_wc),
+        num_teams=num_teams,
+        num_features=len(feature_cols),
+        is_neutral_idx=is_neutral_idx,
+        device=device,
+        config=config,
+        test_df=wc_test_df,
+    )
+
+    # 7. Print results
+    m = result["metrics"]
+    print(f"\n{'='*60}")
+    print("WC 2022 Backtest Results")
+    print(f"{'='*60}")
+    print(f"Matches:        {m['num_samples']}")
+    print(f"Accuracy:       {m['acc']:.4f}")
+    print(f"F1 (macro):     {m['f1_macro']:.4f}")
+    print(f"Brier:          {m['brier']:.4f}")
+    print(f"LogLoss:        {m['logloss']:.4f}")
+    print(f"ECE:            {m['ece']:.4f}")
+    print(f"Epochs trained: {result['epochs_trained']}")
+    print(f"Best val F1:    {result['best_val_f1']:.4f}")
+
+    if result["neutral_metrics"] is not None:
+        nm = result["neutral_metrics"]
+        print(f"\nNeutral-venue subset ({nm['num_samples']} matches):")
+        print(f"  Acc={nm['acc']:.4f}  F1={nm['f1_macro']:.4f}  Brier={nm['brier']:.4f}")
+
+    if result["predictions_df"] is not None:
+        out_path = "results/wc2022_backtest_predictions.csv"
+        result["predictions_df"].to_csv(out_path, index=False)
+        print(f"\nMatch-level predictions saved to {out_path}")
