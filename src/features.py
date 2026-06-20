@@ -2,18 +2,17 @@
 Feature engineering for match prediction.
 Pure functions, no PyTorch dependency.
 
-Canonical 37-feature list — single source of truth for all scripts.
+Canonical 35-feature list — single source of truth for all scripts.
 """
 
 import numpy as np
 import pandas as pd
 
-# Canonical 37-feature list (10 groups)
+# Canonical 35-feature list (10 groups)
 FEATURE_COLS = [
-    # Elo-based (5)
+    # Elo-based (4)
     "elo_advantage_home",
     "elo_quality",
-    "elo_diff_norm",
     "elo_ratio",
     "elo_gap",
     # Form-based (3)
@@ -24,9 +23,6 @@ FEATURE_COLS = [
     "gs_advantage",
     "gc_advantage",
     "goal_diff_advantage",
-    # Strength (2)
-    "strength_advantage",
-    "match_quality",
     # H2H (2)
     "h2h_dominance",
     "has_h2h",
@@ -35,11 +31,10 @@ FEATURE_COLS = [
     "sim_gs_advantage",
     "sim_wr_quality",
     "sim_dr_quality",
-    # Draw-specific (6) — Hvattum 2017
+    # Draw-specific (5) — Hvattum 2017
     "draw_rate_home",
     "draw_rate_away",
     "both_draw_prone",
-    "strength_parity",
     "defensive_similarity",
     "low_scoring_tendency",
     # Positional strength — attack/defense (6)
@@ -49,9 +44,8 @@ FEATURE_COLS = [
     "scoring_potential",
     "defensive_strength",
     "mismatch_flag",
-    # Context (6)
+    # Context (5)
     "is_neutral",
-    "year_norm",
     "is_wc",
     "is_wcq",
     "is_continental",
@@ -68,7 +62,7 @@ POSITIONAL_FEATURE_COLS = [
     "mismatch_flag",
 ]
 
-# FEATURE_COLS without positional features (31 features — baseline)
+# FEATURE_COLS without positional features (29 features — baseline)
 NON_POSITIONAL_FEATURE_COLS = [
     c for c in FEATURE_COLS if c not in POSITIONAL_FEATURE_COLS
 ]
@@ -163,34 +157,25 @@ def compute_positional_features(df):
 
 
 def feature_engineering_v2(df):
-    """Enhanced feature engineering."""
-    print("Engineering enhanced features...")
+    """Enhanced feature engineering — raw natural units for GaussRank."""
+    print("Engineering enhanced features (raw units for GaussRank)...")
     df = df.copy()
 
-    # Basic Elo features
-    df["elo_diff_norm"] = df["elo_diff"] / 400.0
-    df["elo_ratio"] = (df["home_elo"] / df["away_elo"].clip(lower=1000)) - 1.0
-    df["elo_gap"] = abs(df["elo_diff"]) / 400.0
+    df["elo_advantage_home"] = df["elo_diff"]
+    df["elo_quality"] = (df["home_elo"] + df["away_elo"]) / 2
+    df["elo_ratio"] = df["home_elo"] / df["away_elo"]
+    df["elo_gap"] = abs(df["elo_diff"])
 
     # Goal difference-based features
     df["home_goal_diff_avg"] = df["home_goals_scored_avg"] - df["home_goals_conceded_avg"]
     df["away_goal_diff_avg"] = df["away_goals_scored_avg"] - df["away_goals_conceded_avg"]
     df["goal_diff_advantage"] = df["home_goal_diff_avg"] - df["away_goal_diff_avg"]
 
-    # Combined strength score
-    df["home_strength"] = df["home_elo"] / 1500.0 + df["home_win_rate"] * 0.5 + df["home_form"] * 0.3
-    df["away_strength"] = df["away_elo"] / 1500.0 + df["away_win_rate"] * 0.5 + df["away_form"] * 0.3
-    df["strength_advantage"] = df["home_strength"] - df["away_strength"]
-
-    # Match quality / competitiveness
-    df["match_quality"] = (df["home_elo"] + df["away_elo"]) / 3000.0
-
     # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
     df["draw_rate_home"] = df["home_draw_rate"]
     df["draw_rate_away"] = df["away_draw_rate"]
     df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
-    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
-    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
+    df["defensive_similarity"] = abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"])
     df["low_scoring_tendency"] = (
         (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
         & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
@@ -205,14 +190,9 @@ def feature_engineering_v2(df):
 
     # Elo-similarity advantage features
     df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
-    df["sim_dr_advantage"] = df["home_sim_draw_rate"] - df["away_sim_draw_rate"]
     df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
-    df["sim_gc_advantage"] = df["home_sim_gc"] - df["away_sim_gc"]
     df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
     df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
-
-    # Temporal features (normalize year)
-    df["year_norm"] = (df["year"] - 1950) / 80.0
 
     # Tournament type encoding
     df["is_wc"] = df["tournament"].str.contains("FIFA World Cup", na=False).astype(int)

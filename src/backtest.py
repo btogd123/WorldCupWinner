@@ -14,15 +14,16 @@ import numpy as np
 import pandas as pd
 
 from model import create_model, MultiTaskLoss
-from evaluation import compute_metrics
+from evaluation import compute_metrics, print_backtest_report
 from calibration import TemperatureScaler
 from sklearn.metrics import f1_score
 
 
 @dataclass
 class BacktestConfig:
-    lr: float = 0.001
+    lr: float = 0.002
     weight_decay: float = 1e-4
+    dropout_rate: float = 0.3
     train_batch_size: int = 64
     val_batch_size: int = 128
     max_epochs: int = 300
@@ -96,6 +97,11 @@ def run_backtest(
     model = model_factory(
         num_teams, num_match_features=num_features, device=device,
         is_neutral_idx=is_neutral_idx)
+
+    # Apply dropout rate from config (model factory may use a different default)
+    for m in model.modules():
+        if isinstance(m, nn.Dropout):
+            m.p = config.dropout_rate
 
     criterion = MultiTaskLoss(loss_type=config.loss_type, goal_weight=config.goal_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr,
@@ -225,51 +231,81 @@ def run_backtest(
         "epochs_trained": epochs_trained,
         "temperature": float(temperature),
         "best_state_dict": best_state,
+        "y_test": y_test,
+        "probs": probs,
     }
 
 
 if __name__ == "__main__":
     import pandas as pd
     import pickle
-
     from config import PROCESSED_DATA_PATH, TEAM_ENCODER_PATH
     from features import NON_POSITIONAL_FEATURE_COLS, feature_engineering_v2
     from preprocessing import split_data_improved, prepare_enhanced_data
     from model import create_model
 
+    def run_variant(name, train_df, val_df, test_df, wc_test_df, wc_indices,
+                    team_encoder, feature_cols, config=None):
+        print(f"\n{'='*60}")
+        print(f"Variant: {name} ({len(feature_cols)} features, GaussRank)")
+        print(f"{'='*60}")
+
+        X_train, h_train, a_train, y_train, hg_train, ag_train, fc, scaler = \
+            prepare_enhanced_data(train_df, None, team_encoder, fit_scaler=True,
+                                  feature_cols=feature_cols)
+        X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
+            prepare_enhanced_data(val_df, scaler, team_encoder,
+                                  feature_cols=feature_cols)
+        X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = \
+            prepare_enhanced_data(test_df, scaler, team_encoder,
+                                  feature_cols=feature_cols)
+
+        X_wc = X_test[wc_indices]; h_wc = h_test[wc_indices]; a_wc = a_test[wc_indices]
+        y_wc = y_test[wc_indices]; hg_wc = hg_test[wc_indices]; ag_wc = ag_test[wc_indices]
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        is_neutral_idx = fc.index("is_neutral")
+        num_teams = len(team_encoder.classes_)
+
+        def model_factory(num_teams, num_match_features, device, is_neutral_idx):
+            return create_model(num_teams, num_match_features, device, is_neutral_idx)
+
+        if config is None:
+            config = BacktestConfig()
+
+        result = run_backtest(
+            model_factory=model_factory,
+            train_data=(X_train, h_train, a_train, y_train, hg_train, ag_train),
+            val_data=(X_val, h_val, a_val, y_val, hg_val, ag_val),
+            test_data=(X_wc, h_wc, a_wc, y_wc, hg_wc, ag_wc),
+            num_teams=num_teams,
+            num_features=len(fc),
+            is_neutral_idx=is_neutral_idx,
+            device=device,
+            config=config,
+            test_df=wc_test_df,
+        )
+
+        print_backtest_report(result["y_test"], result["probs"], name=name,
+                              predictions_df=result["predictions_df"])
+        return result
+
     print("=" * 60)
-    print("WC 2022 Backtest")
+    print("WC 2022 Backtest — GaussRank")
     print("=" * 60)
 
-    # 1. Load data
     df = pd.read_csv(PROCESSED_DATA_PATH)
     df["date"] = pd.to_datetime(df["date"])
 
     with open(TEAM_ENCODER_PATH, "rb") as f:
         team_encoder = pickle.load(f)
 
-    # 2. Compute features (no positional — hurt WC 2022 neutral-venue backtest)
-    df = feature_engineering_v2(df)
+    feature_cols = list(NON_POSITIONAL_FEATURE_COLS)
 
-    # 3. Chronological split: train before 2022, val Jan–Nov 2022, test after
-    # train_end="2022-01-01" is critical — extending into 2022 shrinks val
-    # (863→535) and causes noisy early stopping that kills draw predictions
+    df = feature_engineering_v2(df)
     train_df, val_df, test_df = split_data_improved(
         df, train_end="2022-01-01", val_end="2022-11-20"
     )
-
-    # 4. Prepare tensors
-    X_train, h_train, a_train, y_train, hg_train, ag_train, feature_cols, scaler = \
-        prepare_enhanced_data(train_df, None, team_encoder, fit_scaler=True,
-                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
-    X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
-        prepare_enhanced_data(val_df, scaler, team_encoder,
-                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
-    X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = \
-        prepare_enhanced_data(test_df, scaler, team_encoder,
-                              feature_cols=NON_POSITIONAL_FEATURE_COLS)
-
-    # 5. Filter test to WC 2022 matches
     wc_mask = (
         test_df["tournament"].str.contains("FIFA World Cup", na=False)
         & ~test_df["tournament"].str.contains("qualification", na=False)
@@ -278,55 +314,11 @@ if __name__ == "__main__":
     )
     wc_indices = np.where(wc_mask.values)[0]
     wc_test_df = test_df[wc_mask].reset_index(drop=True)
-
     print(f"WC 2022 matches in test window: {len(wc_test_df)}")
 
-    X_wc, h_wc, a_wc = X_test[wc_indices], h_test[wc_indices], a_test[wc_indices]
-    y_wc, hg_wc, ag_wc = y_test[wc_indices], hg_test[wc_indices], ag_test[wc_indices]
-
-    # 6. Run backtest
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    is_neutral_idx = feature_cols.index("is_neutral")
-    num_teams = len(team_encoder.classes_)
-
-    def model_factory(num_teams, num_match_features, device, is_neutral_idx):
-        return create_model(num_teams, num_match_features, device, is_neutral_idx)
-
-    config = BacktestConfig()
-
-    result = run_backtest(
-        model_factory=model_factory,
-        train_data=(X_train, h_train, a_train, y_train, hg_train, ag_train),
-        val_data=(X_val, h_val, a_val, y_val, hg_val, ag_val),
-        test_data=(X_wc, h_wc, a_wc, y_wc, hg_wc, ag_wc),
-        num_teams=num_teams,
-        num_features=len(feature_cols),
-        is_neutral_idx=is_neutral_idx,
-        device=device,
-        config=config,
-        test_df=wc_test_df,
+    config = BacktestConfig(goal_weight=0.15)
+    result = run_variant(
+        "GaussRank (NON_POSITIONAL)",
+        train_df, val_df, test_df, wc_test_df, wc_indices,
+        team_encoder, feature_cols, config=config,
     )
-
-    # 7. Print results
-    m = result["metrics"]
-    print(f"\n{'='*60}")
-    print("WC 2022 Backtest Results")
-    print(f"{'='*60}")
-    print(f"Matches:        {m['num_samples']}")
-    print(f"Accuracy:       {m['acc']:.4f}")
-    print(f"F1 (macro):     {m['f1_macro']:.4f}")
-    print(f"Brier:          {m['brier']:.4f}")
-    print(f"LogLoss:        {m['logloss']:.4f}")
-    print(f"ECE:            {m['ece']:.4f}")
-    print(f"Epochs trained: {result['epochs_trained']}")
-    print(f"Best val F1:    {result['best_val_f1']:.4f}")
-
-    if result["neutral_metrics"] is not None:
-        nm = result["neutral_metrics"]
-        print(f"\nNeutral-venue subset ({nm['num_samples']} matches):")
-        print(f"  Acc={nm['acc']:.4f}  F1={nm['f1_macro']:.4f}  Brier={nm['brier']:.4f}")
-
-    if result["predictions_df"] is not None:
-        out_path = "results/wc2022_backtest_predictions.csv"
-        result["predictions_df"].to_csv(out_path, index=False)
-        print(f"\nMatch-level predictions saved to {out_path}")

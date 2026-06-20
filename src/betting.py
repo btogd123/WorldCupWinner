@@ -306,15 +306,11 @@ def quick_check(home_team, away_team, odds_home, odds_draw, odds_away):
 
         feat = {c: 0.0 for c in feature_cols}
         feat.update({
-            "elo_advantage_home": (helo - aelo) / 400.0,
-            "elo_quality": (helo + aelo) / 3000.0,
-            "elo_diff_norm": (helo - aelo) / 400.0,
-            "elo_ratio": (helo / max(aelo, 1000)) - 1.0,
-            "elo_gap": abs(helo - aelo) / 400.0,
-            "strength_advantage": (helo - aelo) / 1500.0,
-            "match_quality": (helo + aelo) / 3000.0,
+            "elo_advantage_home": helo - aelo,
+            "elo_quality": (helo + aelo) / 2,
+            "elo_ratio": helo / aelo,
+            "elo_gap": abs(helo - aelo),
             "is_neutral": 1,
-            "year_norm": (2026 - 1950) / 80.0,
             "is_wc": 1,
         })
 

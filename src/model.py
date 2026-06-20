@@ -120,9 +120,14 @@ class TeamAttentionNet(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
+        _GELU_GAIN = 1.682
         for m in self.modules():
             if isinstance(m, nn.Linear):
+                # ResidualBlock shortcuts handle their own init — don't overwrite.
+                if getattr(m, '_is_shortcut', False):
+                    continue
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                m.weight.data.mul_(_GELU_GAIN / (2.0 ** 0.5))
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.BatchNorm1d):
@@ -155,6 +160,7 @@ class TeamAttentionNet(nn.Module):
         else:
             home_emb = self.team_embedding(home_team_ids) + self.home_indicator
             away_emb = self.team_embedding(away_team_ids) + self.away_indicator
+            
         home_strength = self.team_strength_bias(home_team_ids)
         away_strength = self.team_strength_bias(away_team_ids)
 
@@ -204,7 +210,15 @@ class ResidualBlock(nn.Module):
         self.linear2 = nn.Linear(out_dim, out_dim)
         self.dropout = nn.Dropout(dropout_rate)
 
-        self.shortcut = nn.Linear(in_dim, out_dim) if in_dim != out_dim else nn.Identity()
+        if in_dim != out_dim:
+            self.shortcut = nn.Linear(in_dim, out_dim)
+            # Init projection so output variance ≈ 1.0 (matches main-path scale).
+            nn.init.normal_(self.shortcut.weight, std=(1.0 / in_dim) ** 0.5)
+            nn.init.constant_(self.shortcut.bias, 0)
+            # Mark so upstream _init_weights won't overwrite with Kaiming.
+            self.shortcut._is_shortcut = True
+        else:
+            self.shortcut = nn.Identity()
 
     def forward(self, x):
         residual = self.shortcut(x)
@@ -266,13 +280,14 @@ class MultiTaskLoss(nn.Module):
         return cls_loss + self.goal_weight * goal_loss + conf_penalty, cls_loss, goal_loss
 
 
-def create_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, use_neutral_gating=True, use_neutral_learnable=False):
+def create_model(num_teams, num_match_features=16, device=None, is_neutral_idx=21, dropout_rate=0.25,
+                 use_neutral_gating=True, use_neutral_learnable=False):
     """Create the improved model."""
     model = TeamAttentionNet(
         num_teams=num_teams + 1,
         team_embedding_dim=64,
         num_match_features=num_match_features,
-        dropout_rate=0.25,
+        dropout_rate=dropout_rate,
         is_neutral_idx=is_neutral_idx,
         use_neutral_gating=use_neutral_gating,
         use_neutral_learnable=use_neutral_learnable,

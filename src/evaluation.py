@@ -5,7 +5,10 @@ Pure stateless functions — no PyTorch dependency, only numpy.
 """
 
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, classification_report as sk_classification_report
+from sklearn.metrics import (
+    accuracy_score, f1_score, precision_recall_fscore_support,
+    classification_report as sk_classification_report,
+)
 
 
 def brier_score(y_true, probs):
@@ -73,3 +76,71 @@ def classification_report_dict(y_true, y_pred, target_names=None):
     return sk_classification_report(
         y_true, y_pred, target_names=target_names, output_dict=True, zero_division=0
     )
+
+
+def print_backtest_report(y_true, probs, name=None, predictions_df=None):
+    """Print standardized backtest metrics report.
+
+    Args:
+        y_true: (N,) integer labels (0=away, 1=draw, 2=home)
+        probs: (N, 3) predicted probabilities
+        name: optional variant name displayed in header
+        predictions_df: optional DataFrame with per-row predictions for
+                        actual distribution (takes precedence over y_true)
+    """
+    preds = np.argmax(probs, axis=1)
+    m = compute_metrics(y_true, probs)
+    p, r, f1, support = precision_recall_fscore_support(
+        y_true, preds, labels=[0, 1, 2], zero_division=0
+    )
+
+    header = f"Backtest Results — {name}" if name else "Backtest Results"
+    print(f"\n{'='*60}")
+    print(header)
+    print(f"{'='*60}")
+    print(f"Samples:       {m['num_samples']}")
+    print(f"Accuracy:      {m['acc']:.4f}")
+    print(f"F1 (macro):    {m['f1_macro']:.4f}")
+    print(f"LogLoss:       {m['logloss']:.4f}")
+    print(f"Brier:         {m['brier']:.4f}")
+    print(f"ECE:           {m['ece']:.4f}")
+
+    print(f"\nPer-class:")
+    print(f"{'':<14} {'Precision':>9} {'Recall':>9} {'F1':>9} {'Support':>9}")
+    for i, label in enumerate(["Away Win", "Draw", "Home Win"]):
+        print(f"  {label:<12} {p[i]:>9.4f} {r[i]:>9.4f} {f1[i]:>9.4f} {support[i]:>9}")
+
+    pred_counts = np.bincount(preds, minlength=3)
+    pred_total = len(preds)
+    print(f"\nPredicted:  Away {pred_counts[0]/pred_total*100:.1f}% | "
+          f"Draw {pred_counts[1]/pred_total*100:.1f}% | "
+          f"Home {pred_counts[2]/pred_total*100:.1f}%")
+
+    if predictions_df is not None:
+        actuals = predictions_df["actual_score"].dropna()
+        n_actual = len(actuals)
+        if n_actual > 0:
+            away_n = draw_n = home_n = 0
+            for score in actuals:
+                hs, aws = score.split("-")
+                hs, aws = int(hs), int(aws)
+                if hs > aws:
+                    home_n += 1
+                elif hs == aws:
+                    draw_n += 1
+                else:
+                    away_n += 1
+            print(f"Actual:     Away {away_n/n_actual*100:.1f}% | "
+                  f"Draw {draw_n/n_actual*100:.1f}% | "
+                  f"Home {home_n/n_actual*100:.1f}%")
+
+            correct = predictions_df["correct"].sum()
+            n_valid = predictions_df["correct"].dropna().count()
+            if n_valid > 0:
+                print(f"\nCorrect:      {int(correct)}/{int(n_valid)} = {correct/n_valid*100:.1f}%")
+    else:
+        true_counts = np.bincount(y_true, minlength=3)
+        true_total = len(y_true)
+        print(f"Actual:     Away {true_counts[0]/true_total*100:.1f}% | "
+              f"Draw {true_counts[1]/true_total*100:.1f}% | "
+              f"Home {true_counts[2]/true_total*100:.1f}%")

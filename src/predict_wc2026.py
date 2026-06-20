@@ -353,19 +353,16 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
 
     # Build feature vector using Elo
     feature_dict = {
-        "elo_advantage_home": elo_diff / 400.0,
-        "elo_quality": (home_elo + away_elo) / 2 / 1500.0,
-        "elo_diff_norm": elo_diff / 400.0,
-        "elo_ratio": (home_elo / max(away_elo, 1000)) - 1.0,
-        "elo_gap": abs(elo_diff) / 400.0,
+        "elo_advantage_home": elo_diff,
+        "elo_quality": (home_elo + away_elo) / 2,
+        "elo_ratio": home_elo / away_elo,
+        "elo_gap": abs(elo_diff),
         "form_advantage": 0.0,
         "form_quality": 0.0,
         "wr_advantage": 0.0,
         "gs_advantage": 0.0,
         "gc_advantage": 0.0,
         "goal_diff_advantage": 0.0,
-        "strength_advantage": home_elo / 1500.0 - away_elo / 1500.0,
-        "match_quality": (home_elo + away_elo) / 3000.0,
         "h2h_dominance": 0.0,
         "has_h2h": 0,
         "sim_wr_advantage": 0.0,
@@ -375,7 +372,6 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "draw_rate_home": 0.25,
         "draw_rate_away": 0.25,
         "both_draw_prone": 0.25,
-        "strength_parity": 1.0 / (1.0 + abs(elo_diff) / 100.0),
         "defensive_similarity": 1.0,
         "low_scoring_tendency": 0.0,
         # Positional strength (defaults: no info → balanced)
@@ -387,7 +383,6 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "mismatch_flag": 0.0,
         # Context
         "is_neutral": 1 if is_neutral else 0,
-        "year_norm": (2026 - 1950) / 80.0,
         "is_wc": 1,
         "is_wcq": 0,
         "is_continental": 0,

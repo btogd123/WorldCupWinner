@@ -1,14 +1,71 @@
 """
-Data preparation: StandardScaler + team encoding → tensor tuples.
+Data preparation: GaussRank + team encoding → tensor tuples.
 
 Depends on features.FEATURE_COLS for the canonical feature list.
 """
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
+from scipy.special import erfinv
 
 from features import FEATURE_COLS
+
+
+class GaussRankTransformer:
+    """Rank-based Gaussian transformation — non-parametric, handles any scale.
+
+    For each continuous feature, maps values → empirical percentiles →
+    standard normal quantiles. Binary features are passed through unchanged.
+
+    Fit on train, transform val/test. Out-of-range values are clipped.
+    """
+
+    def __init__(self, epsilon=1e-6):
+        self.epsilon = epsilon
+        self.bins = {}       # col_idx -> (sorted_values, percentiles)
+        self.binary_cols = []
+
+    def fit(self, X, binary_cols=None):
+        self.binary_cols = binary_cols or []
+        self.n_cols = X.shape[1]
+        for col in range(self.n_cols):
+            if col in self.binary_cols:
+                continue
+            col_data = X[:, col]
+            valid = col_data[~np.isnan(col_data)]
+            if len(valid) == 0:
+                continue
+            sorted_vals = np.sort(valid)
+            n = len(sorted_vals)
+            # Midpoint percentiles: (i + 0.5) / n handles ties gracefully
+            percentiles = (np.arange(n) + 0.5) / n
+            self.bins[col] = (sorted_vals.astype(np.float64), percentiles.astype(np.float64))
+
+    def transform(self, X):
+        X_out = X.copy().astype(np.float64)
+        for col in range(self.n_cols):
+            if col in self.binary_cols:
+                continue
+            if col not in self.bins:
+                continue
+            sorted_vals, percentiles = self.bins[col]
+            col_data = X[:, col]
+            # Interpolate rank percentile, clip out-of-range
+            ranks = np.interp(col_data, sorted_vals, percentiles,
+                              left=self.epsilon, right=1.0 - self.epsilon)
+            X_out[:, col] = np.sqrt(2) * erfinv(2.0 * ranks - 1.0)
+        return X_out.astype(np.float32)
+
+    def fit_transform(self, X, binary_cols=None):
+        self.fit(X, binary_cols=binary_cols)
+        return self.transform(X)
+
+
+# Columns that are binary and should not be GaussRank-ed
+BINARY_FEATURE_COLS = {
+    "is_neutral", "is_wc", "is_wcq", "is_continental", "is_friendly",
+    "has_h2h", "low_scoring_tendency", "mismatch_flag",
+}
 
 
 def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False, feature_cols=None):
@@ -16,9 +73,9 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False, feature_co
 
     Args:
         df: DataFrame with all feature columns
-        scaler: StandardScaler (or None if fit_scaler=True)
+        scaler: GaussRankTransformer (or None if fit_scaler=True)
         team_encoder: LabelEncoder for team names
-        fit_scaler: if True, create and fit a new StandardScaler
+        fit_scaler: if True, create and fit a new GaussRankTransformer
         feature_cols: list of feature column names (defaults to FEATURE_COLS)
 
     Returns:
@@ -31,8 +88,9 @@ def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False, feature_co
     X = df[feature_cols].fillna(0).values.astype(np.float32)
 
     if fit_scaler:
-        scaler = StandardScaler()
-        X = scaler.fit_transform(X)
+        binary_indices = [i for i, c in enumerate(feature_cols) if c in BINARY_FEATURE_COLS]
+        scaler = GaussRankTransformer()
+        X = scaler.fit_transform(X, binary_cols=binary_indices)
     else:
         X = scaler.transform(X)
 
