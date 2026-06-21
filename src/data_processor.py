@@ -735,7 +735,8 @@ def engineer_features(df):
     df["is_neutral"] = df["neutral"].astype(int)
 
     # Elo-based features
-    df["elo_advantage_home"] = df["elo_diff"] / 400.0  # Normalized elo difference
+    df["elo_diff"] = df["elo_diff"]
+    df["abs_elo_diff"] = abs(df["elo_diff"])
     df["elo_quality"] = (df["home_elo"] + df["away_elo"]) / 2 / ELO_INITIAL  # Match quality
 
     # Form-based features

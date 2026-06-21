@@ -353,10 +353,10 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
 
     # Build feature vector using Elo
     feature_dict = {
-        "elo_advantage_home": elo_diff,
+        "elo_diff": elo_diff,
         "elo_quality": (home_elo + away_elo) / 2,
         "elo_ratio": home_elo / away_elo,
-        "elo_gap": abs(elo_diff),
+        "abs_elo_diff": abs(elo_diff),
         "form_advantage": 0.0,
         "form_quality": 0.0,
         "wr_advantage": 0.0,

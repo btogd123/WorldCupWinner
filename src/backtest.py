@@ -240,7 +240,7 @@ if __name__ == "__main__":
     import pandas as pd
     import pickle
     from config import PROCESSED_DATA_PATH, TEAM_ENCODER_PATH
-    from features import NON_POSITIONAL_FEATURE_COLS, feature_engineering_v2
+    from features import FEATURE_COLS, NON_POSITIONAL_FEATURE_COLS, feature_engineering_v2, compute_positional_features
     from preprocessing import split_data_improved, prepare_enhanced_data
     from model import create_model
 
@@ -291,7 +291,7 @@ if __name__ == "__main__":
         return result
 
     print("=" * 60)
-    print("WC 2022 Backtest — GaussRank")
+    print("WC 2022 Backtest — 35 feat vs 29 feat (GaussRank)")
     print("=" * 60)
 
     df = pd.read_csv(PROCESSED_DATA_PATH)
@@ -300,9 +300,10 @@ if __name__ == "__main__":
     with open(TEAM_ENCODER_PATH, "rb") as f:
         team_encoder = pickle.load(f)
 
-    feature_cols = list(NON_POSITIONAL_FEATURE_COLS)
-
+    # Base features (non-positional)
     df = feature_engineering_v2(df)
+
+    # Train/val/test split — shared for both variants
     train_df, val_df, test_df = split_data_improved(
         df, train_end="2022-01-01", val_end="2022-11-20"
     )
@@ -317,8 +318,39 @@ if __name__ == "__main__":
     print(f"WC 2022 matches in test window: {len(wc_test_df)}")
 
     config = BacktestConfig(goal_weight=0.15)
-    result = run_variant(
-        "GaussRank (NON_POSITIONAL)",
+
+    # Variant A: 29 features (no positional)
+    result_29 = run_variant(
+        "29 feat (no positional)",
         train_df, val_df, test_df, wc_test_df, wc_indices,
-        team_encoder, feature_cols, config=config,
+        team_encoder, list(NON_POSITIONAL_FEATURE_COLS), config=config,
     )
+
+    # Variant B: 35 features (with positional) — compute positional on full df first
+    df_pos = compute_positional_features(df)
+    train_pos, val_pos, test_pos = split_data_improved(
+        df_pos, train_end="2022-01-01", val_end="2022-11-20"
+    )
+    wc_mask_pos = (
+        test_pos["tournament"].str.contains("FIFA World Cup", na=False)
+        & ~test_pos["tournament"].str.contains("qualification", na=False)
+        & (test_pos["date"] >= pd.to_datetime("2022-11-20"))
+        & (test_pos["date"] <= pd.to_datetime("2022-12-18"))
+    )
+    wc_test_pos = test_pos[wc_mask_pos].reset_index(drop=True)
+
+    result_35 = run_variant(
+        "35 feat (with positional)",
+        train_pos, val_pos, test_pos, wc_test_pos, wc_indices,
+        team_encoder, list(FEATURE_COLS), config=config,
+    )
+
+    # Comparison summary
+    print("\n" + "=" * 60)
+    print("COMPARISON: 29 feat vs 35 feat")
+    print("=" * 60)
+    for label, r in [("29 feat", result_29), ("35 feat", result_35)]:
+        m = r["metrics"]
+        print(f"\n{label}:  Acc={m['acc']:.4f}  F1={m['f1_macro']:.4f}  "
+              f"Brier={m['brier']:.4f}  LogLoss={m['logloss']:.4f}  "
+              f"ECE={m['ece']:.4f}  Epochs={r['epochs_trained']}")

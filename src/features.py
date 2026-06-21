@@ -11,10 +11,10 @@ import pandas as pd
 # Canonical 35-feature list (10 groups)
 FEATURE_COLS = [
     # Elo-based (4)
-    "elo_advantage_home",
+    "elo_diff",
     "elo_quality",
     "elo_ratio",
-    "elo_gap",
+    "abs_elo_diff",
     # Form-based (3)
     "form_advantage",
     "form_quality",
@@ -161,10 +161,10 @@ def feature_engineering_v2(df):
     print("Engineering enhanced features (raw units for GaussRank)...")
     df = df.copy()
 
-    df["elo_advantage_home"] = df["elo_diff"]
+    df["elo_diff"] = df["elo_diff"]
     df["elo_quality"] = (df["home_elo"] + df["away_elo"]) / 2
     df["elo_ratio"] = df["home_elo"] / df["away_elo"]
-    df["elo_gap"] = abs(df["elo_diff"])
+    df["abs_elo_diff"] = abs(df["elo_diff"])
 
     # Goal difference-based features
     df["home_goal_diff_avg"] = df["home_goals_scored_avg"] - df["home_goals_conceded_avg"]
