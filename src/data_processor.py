@@ -275,7 +275,7 @@ def _calc_draw_rate(history, window):
     return draws / len(recent)
 
 
-def calculate_elo_similarity_features(df, elo_delta=75, max_matches=10):
+def calculate_elo_similarity_features(df, elo_delta=125, max_matches=10):
     """Calculate Elo-similarity per-team statistics (no home/away restriction).
 
     For each match, finds prior matches where a team with Elo ~= current home Elo
@@ -761,7 +761,6 @@ def engineer_features(df):
     # Elo-similarity advantage features
     df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
     df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
-    df["sim_wr_quality"] = (df["home_sim_win_rate"] + df["away_sim_win_rate"]) / 2
     df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
 
     # Tournament importance
@@ -825,7 +824,7 @@ def preprocess_pipeline():
     df = calculate_group_context(df)
 
     # Step 4.6: Calculate Elo-similarity features
-    df = calculate_elo_similarity_features(df)
+    df = calculate_elo_similarity_features(df, elo_delta=125)
 
     # Step 5: Engineer features
     df = engineer_features(df)

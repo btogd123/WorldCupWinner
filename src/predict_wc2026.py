@@ -18,7 +18,7 @@ from config import (
     WC2026_END,
 )
 from model import create_model
-from features import compute_positional_features, feature_engineering_v2, POSITIONAL_FEATURE_COLS
+from features import feature_engineering_v2
 
 
 def load_model_and_assets():
@@ -63,18 +63,6 @@ def get_wc2026_matches(df):
     print(f"Found {len(wc_df)} unplayed World Cup 2026 matches")
     return wc_df
 
-
-def _positional_default(col):
-    """Return neutral default for a positional feature when no history is available."""
-    defaults = {
-        "home_att_vs_away_def": 1.0,
-        "away_att_vs_home_def": 1.0,
-        "attack_balance": 0.0,
-        "scoring_potential": 1.0,
-        "defensive_strength": 1.0,
-        "mismatch_flag": 0.0,
-    }
-    return defaults.get(col, 0.0)
 
 
 def prepare_wc_features(df, scaler, feature_cols):
@@ -128,9 +116,6 @@ def predict_all_wc_matches():
     df = pd.read_csv(PROCESSED_DATA_PATH)
     df["date"] = pd.to_datetime(df["date"])
 
-    print("Computing positional strength features...")
-    df = compute_positional_features(df)
-
     print("Engineering features...")
     df = feature_engineering_v2(df)
 
@@ -151,11 +136,6 @@ def predict_all_wc_matches():
         wc_df["home_team_id"] = team_encoder.transform(wc_df["home_team"])
         wc_df["away_team_id"] = team_encoder.transform(wc_df["away_team"])
         # Use feature_engineering_v2 on the synthetic schedule for basic features
-        # (positional features will be filled with defaults since we have no history)
-        for col in POSITIONAL_FEATURE_COLS:
-            if col not in wc_df.columns:
-                wc_df[col] = _positional_default(col)
-        # Run feature engineering for remaining columns
         wc_df = feature_engineering_v2(wc_df)
 
     # Prepare tensors
@@ -367,20 +347,13 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
         "has_h2h": 0,
         "sim_wr_advantage": 0.0,
         "sim_gs_advantage": 0.0,
-        "sim_wr_quality": 0.0,
         "sim_dr_quality": 0.0,
         "draw_rate_home": 0.25,
         "draw_rate_away": 0.25,
         "both_draw_prone": 0.25,
-        "defensive_similarity": 1.0,
+        "defensive_similarity": 0.5,
+        "strength_parity": 0.5,
         "low_scoring_tendency": 0.0,
-        # Positional strength (defaults: no info → balanced)
-        "home_att_vs_away_def": 1.0,
-        "away_att_vs_home_def": 1.0,
-        "attack_balance": 0.0,
-        "scoring_potential": 1.0,
-        "defensive_strength": 1.0,
-        "mismatch_flag": 0.0,
         # Context
         "is_neutral": 1 if is_neutral else 0,
         "is_wc": 1,

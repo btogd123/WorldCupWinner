@@ -240,58 +240,12 @@ if __name__ == "__main__":
     import pandas as pd
     import pickle
     from config import PROCESSED_DATA_PATH, TEAM_ENCODER_PATH
-    from features import FEATURE_COLS, NON_POSITIONAL_FEATURE_COLS, feature_engineering_v2, compute_positional_features
+    from features import FEATURE_COLS, feature_engineering_v2
     from preprocessing import split_data_improved, prepare_enhanced_data
     from model import create_model
 
-    def run_variant(name, train_df, val_df, test_df, wc_test_df, wc_indices,
-                    team_encoder, feature_cols, config=None):
-        print(f"\n{'='*60}")
-        print(f"Variant: {name} ({len(feature_cols)} features, GaussRank)")
-        print(f"{'='*60}")
-
-        X_train, h_train, a_train, y_train, hg_train, ag_train, fc, scaler = \
-            prepare_enhanced_data(train_df, None, team_encoder, fit_scaler=True,
-                                  feature_cols=feature_cols)
-        X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
-            prepare_enhanced_data(val_df, scaler, team_encoder,
-                                  feature_cols=feature_cols)
-        X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = \
-            prepare_enhanced_data(test_df, scaler, team_encoder,
-                                  feature_cols=feature_cols)
-
-        X_wc = X_test[wc_indices]; h_wc = h_test[wc_indices]; a_wc = a_test[wc_indices]
-        y_wc = y_test[wc_indices]; hg_wc = hg_test[wc_indices]; ag_wc = ag_test[wc_indices]
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        is_neutral_idx = fc.index("is_neutral")
-        num_teams = len(team_encoder.classes_)
-
-        def model_factory(num_teams, num_match_features, device, is_neutral_idx):
-            return create_model(num_teams, num_match_features, device, is_neutral_idx)
-
-        if config is None:
-            config = BacktestConfig()
-
-        result = run_backtest(
-            model_factory=model_factory,
-            train_data=(X_train, h_train, a_train, y_train, hg_train, ag_train),
-            val_data=(X_val, h_val, a_val, y_val, hg_val, ag_val),
-            test_data=(X_wc, h_wc, a_wc, y_wc, hg_wc, ag_wc),
-            num_teams=num_teams,
-            num_features=len(fc),
-            is_neutral_idx=is_neutral_idx,
-            device=device,
-            config=config,
-            test_df=wc_test_df,
-        )
-
-        print_backtest_report(result["y_test"], result["probs"], name=name,
-                              predictions_df=result["predictions_df"])
-        return result
-
     print("=" * 60)
-    print("WC 2022 Backtest — 35 feat vs 29 feat (GaussRank)")
+    print("WC 2022 Backtest")
     print("=" * 60)
 
     df = pd.read_csv(PROCESSED_DATA_PATH)
@@ -300,10 +254,8 @@ if __name__ == "__main__":
     with open(TEAM_ENCODER_PATH, "rb") as f:
         team_encoder = pickle.load(f)
 
-    # Base features (non-positional)
     df = feature_engineering_v2(df)
 
-    # Train/val/test split — shared for both variants
     train_df, val_df, test_df = split_data_improved(
         df, train_end="2022-01-01", val_end="2022-11-20"
     )
@@ -317,40 +269,45 @@ if __name__ == "__main__":
     wc_test_df = test_df[wc_mask].reset_index(drop=True)
     print(f"WC 2022 matches in test window: {len(wc_test_df)}")
 
+    feature_cols = list(FEATURE_COLS)
+    print(f"\n{'='*60}")
+    print(f"Backtest: {len(feature_cols)} features, StandardScaler")
+    print(f"{'='*60}")
+
+    X_train, h_train, a_train, y_train, hg_train, ag_train, fc, scaler = \
+        prepare_enhanced_data(train_df, None, team_encoder, fit_scaler=True,
+                              feature_cols=feature_cols)
+    X_val, h_val, a_val, y_val, hg_val, ag_val, _, _ = \
+        prepare_enhanced_data(val_df, scaler, team_encoder,
+                              feature_cols=feature_cols)
+    X_test, h_test, a_test, y_test, hg_test, ag_test, _, _ = \
+        prepare_enhanced_data(test_df, scaler, team_encoder,
+                              feature_cols=feature_cols)
+
+    X_wc = X_test[wc_indices]; h_wc = h_test[wc_indices]; a_wc = a_test[wc_indices]
+    y_wc = y_test[wc_indices]; hg_wc = hg_test[wc_indices]; ag_wc = ag_test[wc_indices]
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    is_neutral_idx = fc.index("is_neutral")
+    num_teams = len(team_encoder.classes_)
+
+    def model_factory(num_teams, num_match_features, device, is_neutral_idx):
+        return create_model(num_teams, num_match_features, device, is_neutral_idx)
+
     config = BacktestConfig(goal_weight=0.15)
 
-    # Variant A: 29 features (no positional)
-    result_29 = run_variant(
-        "29 feat (no positional)",
-        train_df, val_df, test_df, wc_test_df, wc_indices,
-        team_encoder, list(NON_POSITIONAL_FEATURE_COLS), config=config,
+    result = run_backtest(
+        model_factory=model_factory,
+        train_data=(X_train, h_train, a_train, y_train, hg_train, ag_train),
+        val_data=(X_val, h_val, a_val, y_val, hg_val, ag_val),
+        test_data=(X_wc, h_wc, a_wc, y_wc, hg_wc, ag_wc),
+        num_teams=num_teams,
+        num_features=len(fc),
+        is_neutral_idx=is_neutral_idx,
+        device=device,
+        config=config,
+        test_df=wc_test_df,
     )
 
-    # Variant B: 35 features (with positional) — compute positional on full df first
-    df_pos = compute_positional_features(df)
-    train_pos, val_pos, test_pos = split_data_improved(
-        df_pos, train_end="2022-01-01", val_end="2022-11-20"
-    )
-    wc_mask_pos = (
-        test_pos["tournament"].str.contains("FIFA World Cup", na=False)
-        & ~test_pos["tournament"].str.contains("qualification", na=False)
-        & (test_pos["date"] >= pd.to_datetime("2022-11-20"))
-        & (test_pos["date"] <= pd.to_datetime("2022-12-18"))
-    )
-    wc_test_pos = test_pos[wc_mask_pos].reset_index(drop=True)
-
-    result_35 = run_variant(
-        "35 feat (with positional)",
-        train_pos, val_pos, test_pos, wc_test_pos, wc_indices,
-        team_encoder, list(FEATURE_COLS), config=config,
-    )
-
-    # Comparison summary
-    print("\n" + "=" * 60)
-    print("COMPARISON: 29 feat vs 35 feat")
-    print("=" * 60)
-    for label, r in [("29 feat", result_29), ("35 feat", result_35)]:
-        m = r["metrics"]
-        print(f"\n{label}:  Acc={m['acc']:.4f}  F1={m['f1_macro']:.4f}  "
-              f"Brier={m['brier']:.4f}  LogLoss={m['logloss']:.4f}  "
-              f"ECE={m['ece']:.4f}  Epochs={r['epochs_trained']}")
+    print_backtest_report(result["y_test"], result["probs"], name="WC 2022",
+                          predictions_df=result["predictions_df"])

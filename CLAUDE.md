@@ -90,7 +90,7 @@ PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --all
 Inputs:
   ├── Home Team ID → Embedding(64-dim) + Home Indicator (gated by is_neutral)
   ├── Away Team ID → Embedding(64-dim) + Away Indicator (gated by is_neutral)
-  └── Match Features (37-dim) → Encoder(128-dim)
+  └── Match Features (26-dim) → Encoder(128-dim)
 
 Team Interaction: Multi-Head Self-Attention (4 heads)
   → Home + Away embeddings attend to each other
@@ -102,17 +102,16 @@ Outputs:
   └── Goal Prediction Head: 128→64→2 (Home goals, Away goals, MSE auxiliary)
 ```
 
-### Features (37-dimensional)
+### Features (26-dimensional)
 | Category | Features | Source |
 |----------|----------|--------|
-| Elo (5) | elo_advantage_home, elo_quality, elo_diff_norm, elo_ratio, elo_gap | Dynamic Elo calculation |
+| Elo (4) | elo_diff, elo_quality, elo_ratio, abs_elo_diff | Dynamic Elo calculation |
 | Form (3) | form_advantage, form_quality, wr_advantage | 10-match sliding window |
 | Goals (3) | gs_advantage, gc_advantage, goal_diff_advantage | Rolling averages |
-| Strength (2) | strength_advantage, match_quality | Elo + form composite |
 | H2H (2) | h2h_dominance, has_h2h | Historical matchup lookup |
+| Elo-Sim (3) | sim_wr_advantage, sim_gs_advantage, sim_dr_quality | Elo-similarity match lookups |
 | Draw (6) | draw_rate_home, draw_rate_away, both_draw_prone, strength_parity, defensive_similarity, low_scoring_tendency | Hvattum 2017 — Config C |
-| Positional (6) | home_att_vs_away_def, away_att_vs_home_def, attack_balance, scoring_potential, defensive_strength, mismatch_flag | Iterative opponent-corrected atk/def |
-| Context (6) | is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly | Match metadata — `group_round` removed |
+| Context (5) | is_neutral, is_wc, is_wcq, is_continental, is_friendly | Match metadata |
 
 ### Training Config
 - Train: 20,775 matches (2000-2021)
@@ -195,7 +194,7 @@ From `docs/literature_review.md`, ranked by ROI:
 | 🥇 | ~~Add betting odds features~~ (user rejected) | — | — |
 | 🥈 | ~~Pi-Rating instead of pure Elo~~ (tested, regressed) | — | — |
 | 🥉 | ~~Draw-specific features~~ (implemented, Config C) | — | — |
-| 4 | Positional power (atk/def/mid) | +2-3% Acc | Medium |
+| 4 | ~~Positional power (atk/def/mid)~~ (tested, regressed) | — | — |
 | 5 | Player-level features (market value, age) | +2-4% Acc | Medium |
 | 6 | Multi-Headed LSTM | +5-10% Acc | High |
 | 7 | Stacking ensemble (precision-weighted) | +2-4% Acc | Low |

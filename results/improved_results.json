@@ -1,0 +1,12 @@
+{
+  "test_accuracy": null,
+  "test_f1": null,
+  "test_accuracy_calibrated": null,
+  "test_f1_calibrated": null,
+  "temperature": 1.781830072402954,
+  "best_val_f1": 0.5208488957151739,
+  "wcq_accuracy": null,
+  "wcq_f1": null,
+  "wcq_accuracy_calibrated": null,
+  "wcq_f1_calibrated": null
+}

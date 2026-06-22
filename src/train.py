@@ -24,7 +24,7 @@ from config import (
 )
 from model import create_model, MultiTaskLoss
 from calibration import TemperatureScaler
-from features import FEATURE_COLS, POSITIONAL_FEATURE_COLS, compute_positional_features, feature_engineering_v2
+from features import FEATURE_COLS, feature_engineering_v2
 from preprocessing import prepare_enhanced_data, split_data_improved
 from evaluation import compute_metrics
 
@@ -133,10 +133,6 @@ def train_improved():
 
     # Load data
     df, team_encoder = load_and_prepare_data()
-
-    # Compute positional strength features (attack/defense decomposition)
-    print("\n--- Computing Positional Strength Features ---")
-    df = compute_positional_features(df)
 
     # Enhanced feature engineering
     df = feature_engineering_v2(df)
