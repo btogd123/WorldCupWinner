@@ -1,4 +1,4 @@
-version	description	features	scaler	accuracy	f1_macro	brier	logloss	ece	epochs_trained	temperature
-f903c5e	35 feat (with positional): rename elo_diff/abs_elo_diff	35	GaussRank	0.5156	0.4373	0.6210	1.1060	—	—	—
-f903c5e	29 feat (no positional): baseline after removing positional	29	GaussRank	0.5625	0.5180	0.6545	1.2247	—	—	—
-9bb45e8	26 feat: remove sim_wr_quality, add strength_parity, fix defensive_similarity, widen elo_delta 75→125, GaussRank→StandardScaler	26	StandardScaler	0.5156	0.4616	0.6021	1.0647	0.0980	148	1.0
+version	description	features	scaler	accuracy	f1_macro	brier	logloss	ece	pred_A	pred_D	pred_H	actual_A	actual_D	actual_H	epochs_trained	temperature
+f903c5e	35 feat (with positional): rename elo_diff/abs_elo_diff	35	GaussRank	0.5156	0.4373	0.6210	1.1060	—	34.4	9.4	56.2	32.8	23.4	43.8	—	—
+f903c5e	29 feat (no positional): baseline after removing positional	29	GaussRank	0.5625	0.5180	0.6545	1.2247	—	45.3	14.1	40.6	32.8	23.4	43.8	—	—
+9bb45e8	26 feat: remove sim_wr_quality, add strength_parity, fix defensive_similarity, widen elo_delta 75→125, GaussRank→StandardScaler	26	StandardScaler	0.5156	0.4616	0.6021	1.0647	0.0980	40.6	14.1	45.3	32.8	23.4	43.8	148	1.0
