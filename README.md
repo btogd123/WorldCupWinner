@@ -19,15 +19,15 @@ cd WorldCupWinner
 uv sync
 
 # Predict all 72 World Cup matches
-uv run python src/predict_wc2026.py
+uv run python src/scripts/run_predict.py
 
 # Simulate full tournament
 uv run python src/tournament_sim.py
 
 # Betting analysis
-uv run python src/betting.py --sample          # generate sample odds
-uv run python src/betting.py --all             # analyze with real odds
-uv run python src/betting.py --match "France" "Brazil" 2.50 3.20 2.80
+uv run python src/scripts/run_betting.py --sample          # generate sample odds
+uv run python src/scripts/run_betting.py --all             # analyze with real odds
+uv run python src/scripts/run_betting.py --match "France" "Brazil" 2.50 3.20 2.80
 ```
 
 ## GPU Support
@@ -52,12 +52,11 @@ Check: `uv run python -c "import torch; print(torch.cuda.is_available())"`
 
 | Category | Features |
 |----------|----------|
-| Elo (5) | elo_advantage, elo_quality, elo_diff_norm, elo_ratio, elo_gap |
-| Form (3) | form_advantage, form_quality, win_rate_advantage |
-| Goals (3) | goals_scored_adv, goals_conceded_adv, goal_diff_adv |
-| Strength (2) | strength_advantage, match_quality |
-| H2H (2) | h2h_dominance, has_h2h |
-| Context (6) | is_neutral, year_norm, is_wc, is_wcq, is_continental, is_friendly |
+| Elo (4) | elo_diff, elo_quality, elo_ratio, abs_elo_diff |
+| Form (3) | form_advantage, form_quality, wr_advantage |
+| Elo-Sim (3) | sim_wr_advantage, sim_gs_advantage, sim_dr_quality |
+| Draw (6) | draw_rate_home, draw_rate_away, both_draw_prone, strength_parity, defensive_similarity, low_scoring_tendency |
+| Context (5) | is_neutral, is_wc, is_wcq, is_continental, is_friendly |
 
 ## Top 10 Elo Rankings
 

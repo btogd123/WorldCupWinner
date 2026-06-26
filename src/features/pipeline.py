@@ -367,74 +367,6 @@ def calculate_elo_similarity_features(df, elo_delta=125, max_matches=10):
     return matches
 
 
-def calculate_h2h_features(df):
-    """Calculate head-to-head features from past encounters."""
-    print("Calculating head-to-head features...")
-    matches = df.copy()
-
-    # Store all past matches for H2H lookup
-    past_matches = []
-    h2h_home_wins = []
-    h2h_away_wins = []
-    h2h_draws = []
-    h2h_count = []
-
-    for idx, row in matches.iterrows():
-        home_team = row["home_team"]
-        away_team = row["away_team"]
-        current_date = row["date"]
-
-        # Find past matches between these teams
-        h2h_matches = [
-            m
-            for m in past_matches
-            if (m["home_team"] == home_team and m["away_team"] == away_team)
-            or (m["home_team"] == away_team and m["away_team"] == home_team)
-        ]
-
-        if h2h_matches:
-            h_count = len(h2h_matches)
-            h_wins = sum(
-                1
-                for m in h2h_matches
-                if (m["home_team"] == home_team and m["home_score"] > m["away_score"])
-                or (m["home_team"] == away_team and m["away_score"] > m["home_score"])
-            )
-            a_wins = sum(
-                1
-                for m in h2h_matches
-                if (m["home_team"] == away_team and m["home_score"] > m["away_score"])
-                or (m["home_team"] == home_team and m["away_score"] > m["home_score"])
-            )
-            draws = h_count - h_wins - a_wins
-        else:
-            h_count = 0
-            h_wins = 0
-            a_wins = 0
-            draws = 0
-
-        h2h_count.append(h_count)
-        h2h_home_wins.append(h_wins)
-        h2h_away_wins.append(a_wins)
-        h2h_draws.append(draws)
-
-        past_matches.append(
-            {
-                "home_team": home_team,
-                "away_team": away_team,
-                "home_score": row["home_score"],
-                "away_score": row["away_score"],
-                "date": current_date,
-            }
-        )
-
-    matches["h2h_count"] = h2h_count
-    matches["h2h_home_wins"] = h2h_home_wins
-    matches["h2h_away_wins"] = h2h_away_wins
-    matches["h2h_draws"] = h2h_draws
-
-    return matches
-
 def create_wc2026_schedule(team_encoder):
     """Create WC 2026 schedule manually if not in dataset.
 
@@ -521,9 +453,10 @@ def preprocess_pipeline():
     1. Load raw data
     2. Calculate Elo ratings
     3. Calculate recent form
-    4. Calculate H2H features
+    4. Calculate Elo-similarity features
     5. Engineer features
-    6. Save processed data
+    6. Fit and save team encoder
+    7. Save processed data
     """
     print("=" * 60)
     print("Running preprocessing pipeline...")
@@ -538,16 +471,13 @@ def preprocess_pipeline():
     # Step 3: Calculate recent form
     df = calculate_recent_form(df)
 
-    # Step 4: Calculate H2H features
-    df = calculate_h2h_features(df)
-
-    # Step 5: Calculate Elo-similarity features
+    # Step 4: Calculate Elo-similarity features
     df = calculate_elo_similarity_features(df, elo_delta=125)
 
-    # Step 6: Engineer features
+    # Step 5: Engineer features
     df = feature_engineering_v2(df)
 
-    # Step 7: Fit and save team encoder
+    # Step 6: Fit and save team encoder
     all_teams = pd.concat([df["home_team"], df["away_team"]]).unique()
     team_encoder = LabelEncoder()
     team_encoder.fit(all_teams)
@@ -559,7 +489,7 @@ def preprocess_pipeline():
     with open(TEAM_ENCODER_PATH, "wb") as f:
         pickle.dump(team_encoder, f)
 
-    # Step 8: Save processed data
+    # Step 7: Save processed data
     df.to_csv(PROCESSED_DATA_PATH, index=False)
 
     home_wins = (df["result"] == 2).sum()

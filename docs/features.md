@@ -1,6 +1,6 @@
 # Feature Documentation — World Cup 2026 Match Predictor
 
-26 features organized in 7 groups. All features are **pre-match** (no look-ahead bias).
+21 features organized in 5 groups. All features are **pre-match** (no look-ahead bias).
 
 ---
 
@@ -39,30 +39,7 @@ Each match in the window is weighted by recency (越近权重越大): weight = `
 
 ---
 
-## 3. Goal  (3 features)
-
-Rolling averages from the same 10-match window.
-
-| # | Feature | Meaning | Calculation | Example |
-|---|---------|---------|-------------|---------|
-| 8 | `gs_advantage` | 进球能力优势 | `home_goals_scored_avg - away_goals_scored_avg` | 主队场均2.1球 vs 客队1.3球 → `0.80` |
-| 9 | `gc_advantage` | 防守能力优势（失球少=好） | `home_goals_conceded_avg - away_goals_conceded_avg` | 主队场均失0.8 vs 客队失1.5 → `-0.70`（负数说明主队防守更好） |
-| 10 | `goal_diff_advantage` | 净胜球优势 | `(GS_home - GC_home) - (GS_away - GC_away)` | 主队净胜球+1.3 vs 客队-0.2 → `+1.50` |
-
----
-
-## 4. Head-to-Head  (2 features)
-
-H2H records are computed by `data_processor.py:calculate_h2h_features()` — all past meetings between the two teams, regardless of venue.
-
-| # | Feature | Meaning | Calculation | Example |
-|---|---------|---------|-------------|---------|
-| 11 | `h2h_dominance` | 历史交锋优势 | `(h2h_home_wins - h2h_away_wins) / h2h_count` (需要≥3场, 否则为0) | 10次交锋,主队赢6场客队赢2场 → `(6-2)/10 = 0.40` |
-| 12 | `has_h2h` | 有历史交锋记录 | 二值: 1 = 有交锋记录, 0 = 无 | 首次碰面 → `0` |
-
----
-
-## 5. Elo-Similarity  (3 features)
+## 3. Elo-Similarity  (3 features)
 
 Computed by `data_processor.py:calculate_elo_similarity_features()`.
 
@@ -166,26 +143,11 @@ Computed by `data_processor.py:calculate_elo_similarity_features()`.
 
 > **NaN 处理**: 如果球队历史不足 10 场，用已有场次计算。
 
-**被以下入模特征依赖**: `form_advantage`, `form_quality`, `wr_advantage`, `gs_advantage`, `gc_advantage`, `goal_diff_advantage`, `draw_rate_home`, `draw_rate_away`, `both_draw_prone`, `defensive_similarity`, `low_scoring_tendency`
+**被以下入模特征依赖**: `form_advantage`, `form_quality`, `wr_advantage`, `draw_rate_home`, `draw_rate_away`, `both_draw_prone`, `defensive_similarity`, `low_scoring_tendency`
 
 ---
 
-### B.3 Head-to-Head 中间列（calculate_h2h_features）
-
-H2H 统计两队**历史上所有交锋**（不限年份，不限赛事）。
-
-| # | Column | Meaning | Calculation | Example |
-|---|--------|---------|-------------|---------|
-| I16 | `h2h_count` | 历史交锋总次数 | 统计两队所有历史碰面 | 西班牙 vs 克罗地亚历史交锋 8 次 → `8` |
-| I17 | `h2h_home_wins` | 当前主队在历史交锋中的胜场 | 从当前主队视角统计 | 西班牙作为主队方赢了 3 次 → `3` |
-| I18 | `h2h_away_wins` | 当前客队在历史交锋中的胜场 | 从当前客队视角统计 | 克罗地亚赢了 2 次 → `2` |
-| I19 | `h2h_draws` | 历史交锋平局场次 | `h2h_count - h2h_home_wins - h2h_away_wins` | 8 - 3 - 2 = `3` |
-
-**被以下入模特征依赖**: `h2h_dominance`, `has_h2h`
-
----
-
-### B.4 Elo-Similarity 中间列（calculate_elo_similarity_features）
+### B.3 Elo-Similarity 中间列（calculate_elo_similarity_features）
 
 核心思想：找历史上 "Elo 水平类似的两队" 的比赛，看类似强队对类似弱队的表现如何。
 
@@ -216,13 +178,11 @@ H2H 统计两队**历史上所有交锋**（不限年份，不限赛事）。
 
 | # | Column | Meaning | Calculation | Used By |
 |---|--------|---------|-------------|---------|
-| I28 | `home_goal_diff_avg` | 主队场均净胜球 | `home_GS_avg - home_GC_avg` | `goal_diff_advantage` |
-| I29 | `away_goal_diff_avg` | 客队场均净胜球 | `away_GS_avg - away_GC_avg` | `goal_diff_advantage` |
-| I30 | `neutral` | 中立场地（原始bool） | 来自 results.csv | `is_neutral` |
-| I31 | `tournament_importance` | 赛事重要性（0-3） | 世界杯正赛=3, 预选赛/洲际赛=2, 友谊赛=0 | 未入模（Elo 更新使用） |
-| I32 | `home_team_id` | 主队整数编码 | LabelEncoder 编码 | 模型 Embedding 输入 |
-| I33 | `away_team_id` | 客队整数编码 | 同上 | 模型 Embedding 输入 |
-| I34 | `result` | 比赛结果编码 | 0=Away Win, 1=Draw, 2=Home Win | 训练标签（y） |
+| I16 | `neutral` | 中立场地（原始bool） | 来自 results.csv | `is_neutral` |
+| I17 | `tournament_importance` | 赛事重要性（0-3） | 世界杯正赛=3, 预选赛/洲际赛=2, 友谊赛=0 | 未入模（Elo 更新使用） |
+| I18 | `home_team_id` | 主队整数编码 | LabelEncoder 编码 | 模型 Embedding 输入 |
+| I19 | `away_team_id` | 客队整数编码 | 同上 | 模型 Embedding 输入 |
+| I20 | `result` | 比赛结果编码 | 0=Away Win, 1=Draw, 2=Home Win | 训练标签（y） |
 
 ### B.6 未使用列（Not Used Anywhere）
 
@@ -237,13 +197,18 @@ H2H 统计两队**历史上所有交锋**（不限年份，不限赛事）。
 | N5 | `is_already_qualified_away` | calculate_group_context | 同上 |
 | N6 | `must_win_to_survive_home` | calculate_group_context | 同上 |
 | N7 | `must_win_to_survive_away` | calculate_group_context | 同上 |
-| N8 | `h2h_draws` | calculate_h2h_features | 未被 h2h_dominance 使用 |
-| N9 | `city` | results.csv | 仅用于元数据 |
-| N10 | `country` | results.csv | 仅用于元数据 |
-| N11 | `year` | engineer_features | 未直接入模 |
-| N12 | `month` | engineer_features | 保留以备探索 |
-| N13 | `days_since_first` | engineer_features | 保留以备探索 |
-| N14 | `tournament_importance` | engineer_features | 仅用于 Elo K-factor 调整 |
+| N8 | `h2h_count` | calculate_h2h_features | H2H 特征（h2h_dominance/has_h2h）已移除 |
+| N9 | `h2h_home_wins` | calculate_h2h_features | 同上 |
+| N10 | `h2h_away_wins` | calculate_h2h_features | 同上 |
+| N11 | `h2h_draws` | calculate_h2h_features | 同上 |
+| N12 | `home_goal_diff_avg` | feature_engineering_v2 | Goal 特征（gs/gc/goal_diff）已移除 |
+| N13 | `away_goal_diff_avg` | feature_engineering_v2 | 同上 |
+| N14 | `city` | results.csv | 仅用于元数据 |
+| N15 | `country` | results.csv | 仅用于元数据 |
+| N16 | `year` | engineer_features | 未直接入模 |
+| N17 | `month` | engineer_features | 保留以备探索 |
+| N18 | `days_since_first` | engineer_features | 保留以备探索 |
+| N19 | `tournament_importance` | engineer_features | 仅用于 Elo K-factor 调整 |
 
 ---
 
@@ -253,9 +218,9 @@ H2H 统计两队**历史上所有交锋**（不限年份，不限赛事）。
 
 1. **缺失值填充**: 所有 NaN 填充为 0
 2. **StandardScaler**: z-score 标准化（均值0，标准差1）
-3. **Binary passthrough**: 7 个二值特征不参与标准化，保持原始 0/1 值：
+3. **Binary passthrough**: 6 个二值特征不参与标准化，保持原始 0/1 值：
    - `is_neutral`, `is_wc`, `is_wcq`, `is_continental`, `is_friendly`
-   - `has_h2h`, `low_scoring_tendency`
+   - `low_scoring_tendency`
 4. **is_neutral 特殊处理**: 即使不在 binary 列表中，也必须保持原始 0/1 值 — 标准化会破坏 neutral venue gating 的架构逻辑
 
 ---
@@ -266,24 +231,23 @@ H2H 统计两队**历史上所有交锋**（不限年份，不限赛事）。
 data/results.csv (49K raw matches)
     │
     ▼
-data_processor.py
+src/features/pipeline.py
     ├── calculate_elo_ratings()          → home_elo, away_elo, elo_diff
     ├── calculate_recent_form()          → home_form, home_win_rate, home_draw_rate, GS/GC avg
-    ├── calculate_h2h_features()         → h2h_count, h2h_home_wins, h2h_away_wins
     ├── calculate_elo_similarity_features() → home_sim_win_rate, home_sim_gs, etc.
-    └── calculate_group_context()        → group_round, qualification status (不在26特征中)
+    └── calculate_group_context()        → group_round, qualification status (不在21特征中)
     │
     ▼
 data/processed_matches.csv (49K rows + all intermediate features)
     │
     ▼
-features.py
-    └── feature_engineering_v2()         → 完整26特征 (派生 + 归一化 + 编码)
+src/features/builder.py
+    └── feature_engineering_v2()         → 完整21特征 (派生 + 归一化 + 编码)
     │
     ▼
-preprocessing.py
+src/features/builder.py
     └── prepare_enhanced_data()          → StandardScaler + 转 tensor (binary特征保持原始0/1)
     │
     ▼
-model.py                                → TeamAttentionNet 消费 26-dim 特征向量
+src/modeling/architecture.py            → TeamAttentionNet 消费 21-dim 特征向量
 ```
