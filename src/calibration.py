@@ -86,3 +86,43 @@ class TemperatureScaler:
     def get_temperature(self):
         """Return the learned temperature value."""
         return self.temperature.item()
+
+
+def calibrate_and_evaluate(val_logits, val_labels, test_logits, test_labels=None,
+                           device=None):
+    """Fit temperature scaling on val logits and apply to test logits.
+
+    Args:
+        val_logits: (N, C) numpy array of validation logits
+        val_labels: (N,) numpy array of validation labels
+        test_logits: (M, C) numpy array of test logits
+        test_labels: optional (M,) numpy array of test labels for evaluation
+        device: torch device
+
+    Returns:
+        dict with keys: raw_probs, calibrated_probs, temperature,
+                        and (if test_labels given) raw_accuracy, raw_f1,
+                        calibrated_accuracy, calibrated_f1
+    """
+    scaler = TemperatureScaler()
+    scaler.fit(val_logits, val_labels, device=device)
+    T = scaler.get_temperature()
+
+    cal_probs = scaler.calibrate(test_logits)
+
+    logits_t = torch.FloatTensor(test_logits)
+    raw_probs = F.softmax(logits_t, dim=-1).numpy()
+
+    result = {"raw_probs": raw_probs, "calibrated_probs": cal_probs, "temperature": T}
+
+    if test_labels is not None:
+        from sklearn.metrics import accuracy_score, f1_score
+
+        raw_preds = np.argmax(raw_probs, axis=1)
+        cal_preds = np.argmax(cal_probs, axis=1)
+        result["raw_accuracy"] = accuracy_score(test_labels, raw_preds)
+        result["raw_f1"] = f1_score(test_labels, raw_preds, average="macro")
+        result["calibrated_accuracy"] = accuracy_score(test_labels, cal_preds)
+        result["calibrated_f1"] = f1_score(test_labels, cal_preds, average="macro")
+
+    return result

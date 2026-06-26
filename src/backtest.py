@@ -13,10 +13,11 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import pandas as pd
 
+from config import set_seed
 from model import create_model, MultiTaskLoss
 from evaluation import compute_metrics, print_backtest_report
 from calibration import TemperatureScaler
-from sklearn.metrics import f1_score
+from engine import Trainer
 
 
 @dataclass
@@ -72,10 +73,7 @@ def run_backtest(
     if config is None:
         config = BacktestConfig()
 
-    torch.manual_seed(config.seed)
-    np.random.seed(config.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(config.seed)
+    set_seed(config.seed)
 
     X_train, h_train, a_train, y_train, hg_train, ag_train = train_data
     X_val, h_val, a_val, y_val, hg_val, ag_val = val_data
@@ -109,46 +107,13 @@ def run_backtest(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=config.T_0, T_mult=config.T_mult, eta_min=config.eta_min)
 
-    best_val_f1 = 0
-    patience_counter = 0
-    best_state = None
+    trainer = Trainer(model, optimizer, scheduler, criterion, device,
+                      patience=config.patience, grad_clip_norm=config.grad_clip_norm,
+                      max_epochs=config.max_epochs)
 
-    for epoch in range(1, config.max_epochs + 1):
-        model.train()
-        for X, h_ids, a_ids, y, hg, ag in train_loader:
-            X, h_ids, a_ids, y = X.to(device), h_ids.to(device), a_ids.to(device), y.to(device)
-            hg, ag = hg.to(device), ag.to(device)
-            optimizer.zero_grad()
-            logits, goals = model(h_ids, a_ids, X, return_goals=True)
-            loss, _, _ = criterion(logits, goals, y, hg, ag)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.grad_clip_norm)
-            optimizer.step()
-        scheduler.step()
-
-        model.eval()
-        val_preds, val_labels = [], []
-        with torch.no_grad():
-            for X, h_ids, a_ids, y, hg, ag in val_loader:
-                X, h_ids, a_ids, y = X.to(device), h_ids.to(device), a_ids.to(device), y.to(device)
-                logits, _ = model(h_ids, a_ids, X, return_goals=True)
-                val_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
-                val_labels.extend(y.cpu().numpy())
-
-        val_f1 = f1_score(val_labels, val_preds, average="macro")
-        if val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            patience_counter = 0
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-        else:
-            patience_counter += 1
-        if patience_counter >= config.patience:
-            break
-
-    epochs_trained = epoch - patience_counter
-
-    model.load_state_dict(best_state)
-    model.eval()
+    best_val_f1 = trainer.fit(train_loader, val_loader, verbose=config.verbose)
+    epochs_trained = trainer.epochs_trained
+    best_state = trainer.best_state
 
     X_test_t = torch.FloatTensor(X_test).to(device)
     h_test_t = torch.LongTensor(h_test).to(device)

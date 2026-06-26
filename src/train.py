@@ -21,12 +21,14 @@ from config import (
     LEARNING_RATE,
     RESULTS_DIR,
     IMPORTANT_TOURNAMENTS,
+    set_seed,
 )
 from model import create_model, MultiTaskLoss
-from calibration import TemperatureScaler
+from calibration import calibrate_and_evaluate
 from features import FEATURE_COLS, feature_engineering_v2
 from preprocessing import prepare_enhanced_data, split_data_improved
 from evaluation import compute_metrics
+from engine import Trainer
 
 
 def load_and_prepare_data():
@@ -41,91 +43,10 @@ def load_and_prepare_data():
     return df, team_encoder
 
 
-def train_epoch_improved(model, loader, optimizer, criterion, device):
-    """Train one epoch with the improved model and loss."""
-    model.train()
-    total_loss = 0
-    total_ce = 0
-    total_goal = 0
-    all_preds, all_labels = [], []
-
-    for X, h_ids, a_ids, y, hg, ag in loader:
-        X = X.to(device)
-        h_ids = h_ids.to(device)
-        a_ids = a_ids.to(device)
-        y = y.to(device)
-        hg = hg.to(device)
-        ag = ag.to(device)
-
-        optimizer.zero_grad()
-        logits, goals = model(h_ids, a_ids, X, return_goals=True)
-        loss, ce_loss, goal_loss = criterion(logits, goals, y, hg, ag)
-        loss.backward()
-
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        optimizer.step()
-
-        total_loss += loss.item()
-        total_ce += ce_loss.item()
-        total_goal += goal_loss.item()
-        preds = torch.argmax(logits, dim=1)
-        all_preds.extend(preds.cpu().numpy())
-        all_labels.extend(y.cpu().numpy())
-
-    n = len(loader)
-    avg_loss = total_loss / n
-    acc = accuracy_score(all_labels, all_preds)
-    f1 = f1_score(all_labels, all_preds, average="macro")
-
-    return avg_loss, acc, f1
-
-
-def evaluate_improved(model, loader, criterion, device):
-    """Evaluate improved model."""
-    model.eval()
-    total_loss = 0
-    all_preds, all_labels, all_probs = [], [], []
-
-    with torch.no_grad():
-        for X, h_ids, a_ids, y, hg, ag in loader:
-            X = X.to(device)
-            h_ids = h_ids.to(device)
-            a_ids = a_ids.to(device)
-            y = y.to(device)
-            hg = hg.to(device)
-            ag = ag.to(device)
-
-            logits, goals = model(h_ids, a_ids, X, return_goals=True)
-            loss, _, _ = criterion(logits, goals, y, hg, ag)
-            total_loss += loss.item()
-
-            probs = torch.softmax(logits, dim=1)
-            preds = torch.argmax(logits, dim=1)
-
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(y.cpu().numpy())
-            all_probs.extend(probs.cpu().numpy())
-
-    n = len(loader)
-    avg_loss = total_loss / n
-    acc = accuracy_score(all_labels, all_preds)
-    f1 = f1_score(all_labels, all_preds, average="macro")
-
-    return avg_loss, acc, f1, all_preds, all_labels, all_probs
-
-
 def train_improved():
     """Main training function for improved model."""
-    # Reproducibility
-    import random
-    SEED = 99  # Best seed: WCQ 62.00% acc, 57.62% F1, 33% draw recall
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(SEED)
+    # Reproducibility — best seed: WCQ 62.00% acc, 57.62% F1, 33% draw recall
+    set_seed(99)
 
     print("=" * 60)
     print("Training Improved Match Predictor")
@@ -198,62 +119,28 @@ def train_improved():
     )
 
     # Training loop
-    best_val_f1 = 0
-    patience = 25
-    patience_counter = 0
-    history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": [], "val_f1": []}
+    trainer = Trainer(model, optimizer, scheduler, criterion, device,
+                      patience=25, grad_clip_norm=1.0, max_epochs=300)
 
-    print(f"\nTraining... (max 300 epochs)")
-    for epoch in range(1, 301):
-        train_loss, train_acc, train_f1 = train_epoch_improved(
-            model, train_loader, optimizer, criterion, device
-        )
-        val_loss, val_acc, val_f1, _, _, _ = evaluate_improved(
-            model, val_loader, criterion, device
-        )
+    print(f"\nTraining... (max {trainer.max_epochs} epochs)")
+    best_val_f1 = trainer.fit(train_loader, val_loader)
 
-        scheduler.step()
-
-        history["train_loss"].append(train_loss)
-        history["val_loss"].append(val_loss)
-        history["train_acc"].append(train_acc)
-        history["val_acc"].append(val_acc)
-        history["val_f1"].append(val_f1)
-
-        if epoch % 20 == 0 or epoch == 1:
-            print(
-                f"Epoch {epoch:3d} | "
-                f"Train Loss: {train_loss:.4f} | Acc: {train_acc:.3f} | "
-                f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.3f} | F1: {val_f1:.3f}"
-            )
-
-        if val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            patience_counter = 0
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "num_teams": num_teams + 1,
-                    "num_match_features": len(feature_cols),
-                    "is_neutral_idx": is_neutral_idx,
-                    "team_encoder": team_encoder,
-                    "scaler": enhanced_scaler,
-                    "feature_cols": feature_cols,
-                },
-                MODEL_PATH,
-            )
-        else:
-            patience_counter += 1
-
-        if patience_counter >= patience:
-            print(f"Early stopping at epoch {epoch}")
-            break
+    # Save checkpoint on best val F1
+    torch.save(
+        {
+            "model_state_dict": trainer.best_state,
+            "num_teams": num_teams + 1,
+            "num_match_features": len(feature_cols),
+            "is_neutral_idx": is_neutral_idx,
+            "team_encoder": team_encoder,
+            "scaler": enhanced_scaler,
+            "feature_cols": feature_cols,
+        },
+        MODEL_PATH,
+    )
 
     print(f"\nBest val F1: {best_val_f1:.4f}")
-
-    # Load best model
-    checkpoint = torch.load(MODEL_PATH, weights_only=False)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    history = trainer.history
 
     # Temperature Scaling calibration (on validation set)
     print("\n" + "=" * 60)
@@ -276,23 +163,12 @@ def train_improved():
     val_labels = torch.cat(val_labels).numpy()
 
     # Learn optimal temperature
-    scaler_temp = TemperatureScaler()
-    scaler_temp.fit(val_logits, val_labels, device=device)
-    T = scaler_temp.get_temperature()
+    cal_result = calibrate_and_evaluate(val_logits, val_labels, val_logits, val_labels,
+                                        device=device)
+    T = cal_result["temperature"]
     print(f"Learned temperature: T = {T:.4f}")
-
-    # Show calibration effect
-    val_probs_raw = torch.softmax(torch.FloatTensor(val_logits), dim=-1).numpy()
-    val_probs_cal = scaler_temp.calibrate(val_logits)
-    val_preds_raw = np.argmax(val_probs_raw, axis=1)
-    val_preds_cal = np.argmax(val_probs_cal, axis=1)
-
-    raw_acc = accuracy_score(val_labels, val_preds_raw)
-    cal_acc = accuracy_score(val_labels, val_preds_cal)
-    raw_f1 = f1_score(val_labels, val_preds_raw, average="macro")
-    cal_f1 = f1_score(val_labels, val_preds_cal, average="macro")
-
-    print(f"Validation: Raw Acc={raw_acc:.4f} F1={raw_f1:.4f} → Cal Acc={cal_acc:.4f} F1={cal_f1:.4f}")
+    print(f"Validation: Raw Acc={cal_result['raw_accuracy']:.4f} F1={cal_result['raw_f1']:.4f} "
+          f"→ Cal Acc={cal_result['calibrated_accuracy']:.4f} F1={cal_result['calibrated_f1']:.4f}")
     if T < 1.0:
         print(f"T={T:.4f} < 1 → model was underconfident, probabilities sharpened")
     else:
@@ -336,10 +212,12 @@ def train_improved():
         test_logits_all = torch.cat(test_logits_list).numpy()
         test_labels_all = torch.cat(test_labels_list).numpy()
 
-        test_probs_cal = scaler_temp.calibrate(test_logits_all)
+        test_cal = calibrate_and_evaluate(val_logits, val_labels, test_logits_all,
+                                          test_labels_all, device=device)
+        test_probs_cal = test_cal["calibrated_probs"]
         test_preds_cal = np.argmax(test_probs_cal, axis=1)
-        test_acc_cal = accuracy_score(test_labels_all, test_preds_cal)
-        test_f1_cal = f1_score(test_labels_all, test_preds_cal, average="macro")
+        test_acc_cal = test_cal["calibrated_accuracy"]
+        test_f1_cal = test_cal["calibrated_f1"]
 
         print(f"\nTest (raw):       Acc={test_acc:.4f}, F1={test_f1:.4f}")
         print(f"Test (calibrated): Acc={test_acc_cal:.4f}, F1={test_f1_cal:.4f}")
@@ -365,14 +243,18 @@ def train_improved():
                 a_t = torch.LongTensor(a_wcq).to(device)
                 y_t = torch.LongTensor(y_wcq).to(device)
                 logits = model(h_t, a_t, X_t)
-                wcq_preds = torch.argmax(logits, dim=1).cpu().numpy()
+                wcq_probs_raw = torch.softmax(logits, dim=1).cpu().numpy()
+                wcq_preds = np.argmax(wcq_probs_raw, axis=1)
                 wcq_acc = accuracy_score(y_wcq, wcq_preds)
                 wcq_f1 = f1_score(y_wcq, wcq_preds, average="macro")
 
-                wcq_probs_cal = scaler_temp.calibrate(logits.cpu().numpy())
+                wcq_cal = calibrate_and_evaluate(val_logits, val_labels,
+                                                 logits.cpu().numpy(), y_wcq,
+                                                 device=device)
+                wcq_probs_cal = wcq_cal["calibrated_probs"]
                 wcq_preds_cal = np.argmax(wcq_probs_cal, axis=1)
-                wcq_acc_cal = accuracy_score(y_wcq, wcq_preds_cal)
-                wcq_f1_cal = f1_score(y_wcq, wcq_preds_cal, average="macro")
+                wcq_acc_cal = wcq_cal["calibrated_accuracy"]
+                wcq_f1_cal = wcq_cal["calibrated_f1"]
 
             print(f"\nWorld Cup Qualifiers ({len(wcq_test)} matches):")
             print(f"  Raw:        Acc={wcq_acc:.4f}, F1={wcq_f1:.4f}")

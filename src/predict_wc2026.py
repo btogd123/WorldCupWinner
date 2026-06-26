@@ -16,9 +16,11 @@ from config import (
     RESULTS_DIR,
     WC2026_START,
     WC2026_END,
+    set_seed,
 )
 from model import create_model
 from features import feature_engineering_v2
+from data_processor import create_wc2026_schedule
 
 
 def load_model_and_assets():
@@ -218,97 +220,6 @@ def predict_all_wc_matches():
     return results_df
 
 
-def create_wc2026_schedule(team_encoder):
-    """Create WC 2026 schedule manually if not in dataset."""
-    # WC 2026 has 48 teams in groups of 4 (12 groups)
-    # Top 2 from each group + 8 best 3rd place advance
-    # This is a simplified version with key matches
-
-    # The 48 qualified teams (based on typical qualifications as of 2026)
-    # This list should be updated with actual qualified teams
-    qualified_teams = [
-        # Hosts
-        "United States", "Mexico", "Canada",
-        # AFC
-        "Japan", "South Korea", "Saudi Arabia", "Iran", "Australia",
-        "Qatar", "United Arab Emirates", "Iraq",
-        # CAF
-        "Morocco", "Senegal", "Egypt", "Algeria", "Nigeria",
-        "Cameroon", "Ghana", "Ivory Coast", "Tunisia",
-        # CONCACAF
-        "Costa Rica", "Panama", "Jamaica", "Honduras",
-        # CONMEBOL
-        "Argentina", "Brazil", "Uruguay", "Colombia", "Ecuador",
-        "Peru", "Chile", "Paraguay",
-        # OFC
-        "New Zealand",
-        # UEFA
-        "France", "Spain", "England", "Germany", "Portugal",
-        "Netherlands", "Italy", "Belgium", "Croatia", "Denmark",
-        "Switzerland", "Austria", "Serbia", "Ukraine", "Turkey",
-        "Sweden",
-    ]
-
-    # Verify all teams are in the encoder
-    valid_teams = []
-    for team in qualified_teams:
-        if team in team_encoder.classes_:
-            valid_teams.append(team)
-        else:
-            print(f"Warning: {team} not found in team encoder, skipping")
-
-    print(f"Valid teams for WC 2026: {len(valid_teams)}/{len(qualified_teams)}")
-
-    if len(valid_teams) < 32:
-        print("Not enough valid teams to create meaningful schedule")
-        return None
-
-    # Create a simple tournament structure
-    # For now, we'll create group stage matches
-    import random
-    random.seed(42)
-
-    # Shuffle and create groups
-    teams = valid_teams[:48] if len(valid_teams) >= 48 else valid_teams
-    random.shuffle(teams)
-
-    # Create groups of 4
-    groups = []
-    for i in range(0, min(48, len(teams)), 4):
-        if i + 3 < len(teams):
-            groups.append(teams[i : i + 4])
-
-    # Generate round-robin matches for each group
-    matches = []
-    match_date = pd.to_datetime("2026-06-11")
-
-    for group_idx, group in enumerate(groups):
-        # Round-robin within group (6 matches per group)
-        for i in range(4):
-            for j in range(i + 1, 4):
-                # Alternate home/away
-                if (i + j) % 2 == 0:
-                    home_team, away_team = group[i], group[j]
-                else:
-                    home_team, away_team = group[j], group[i]
-
-                matches.append(
-                    {
-                        "date": match_date,
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "tournament": "FIFA World Cup",
-                        "neutral": True,
-                    }
-                )
-
-        match_date += pd.Timedelta(days=1)
-
-    schedule_df = pd.DataFrame(matches)
-    print(f"Created schedule with {len(schedule_df)} group matches across {len(groups)} groups")
-    return schedule_df
-
-
 def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA World Cup"):
     """Predict a single custom match."""
     model, team_encoder, scaler, feature_cols, temperature, device = load_model_and_assets()
@@ -327,9 +238,7 @@ def predict_custom_match(home_team, away_team, is_neutral=True, tournament="FIFA
     elo_diff = home_elo - away_elo
 
     # Simplified feature computation
-    import random
-    random.seed(42)
-    np.random.seed(42)
+    set_seed(42)
 
     # Build feature vector using Elo
     feature_dict = {

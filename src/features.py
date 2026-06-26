@@ -59,6 +59,18 @@ def feature_engineering_v2(df):
     df["away_goal_diff_avg"] = df["away_goals_scored_avg"] - df["away_goals_conceded_avg"]
     df["goal_diff_advantage"] = df["home_goal_diff_avg"] - df["away_goal_diff_avg"]
 
+    # Form-based features
+    df["form_advantage"] = df["home_form"] - df["away_form"]
+    df["form_quality"] = (df["home_form"] + df["away_form"]) / 2
+    df["wr_advantage"] = df["home_win_rate"] - df["away_win_rate"]
+
+    # Goal strength features
+    df["gs_advantage"] = df["home_goals_scored_avg"] - df["away_goals_scored_avg"]
+    df["gc_advantage"] = df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]
+
+    # H2H
+    df["has_h2h"] = (df["h2h_count"] > 0).astype(int)
+
     # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
     df["draw_rate_home"] = df["home_draw_rate"]
     df["draw_rate_away"] = df["away_draw_rate"]

@@ -3,6 +3,7 @@ Data processing pipeline: Elo ratings, feature engineering, and dataset preparat
 """
 import pandas as pd
 import numpy as np
+import random
 from datetime import datetime
 from sklearn.preprocessing import LabelEncoder
 import pickle
@@ -21,6 +22,7 @@ from config import (
     RECENT_FORM_WINDOW,
     IMPORTANT_TOURNAMENTS,
 )
+from features import feature_engineering_v2
 
 
 def load_raw_data(path=None):
@@ -433,365 +435,84 @@ def calculate_h2h_features(df):
 
     return matches
 
+def create_wc2026_schedule(team_encoder):
+    """Create WC 2026 schedule manually if not in dataset.
 
-# --- Group Context (Fighting Spirit) Features ---
-
-
-def _get_edition_key(tournament, year):
-    """Map tournament name + year to a unique edition key.
-
-    Returns e.g. "WC2022", "WCQ2022", "EURO2024", "COPA2024".
-    Returns None for unsupported or non-group tournaments.
+    WC 2026 has 48 teams in groups of 4 (12 groups).
+    Top 2 from each group + 8 best 3rd place advance.
     """
-    t = str(tournament).lower()
-    y = int(year)
+    from config import set_seed
 
-    if "fifa world cup" in t and "qualification" not in t:
-        return f"WC{y}"
-    if "fifa world cup" in t and "qualification" in t:
-        return f"WCQ{y}"
-    if "uefa euro" in t and "qualification" not in t:
-        return f"EURO{y}"
-    if "uefa euro" in t and "qualification" in t:
-        return f"EUROQ{y}"
-    if "copa am" in t and "qualification" not in t:
-        return f"COPA{y}"
-    if "african cup" in t and "qualification" not in t:
-        return f"AFCON{y}"
-    if "african cup" in t and "qualification" in t:
-        return f"AFCONQ{y}"
-    if "asian cup" in t and "qualification" not in t:
-        return f"ASIANCUP{y}"
-    if "asian cup" in t and "qualification" in t:
-        return f"ASIANCUPQ{y}"
-    if "gold cup" in t and "qualification" not in t:
-        return f"GOLDCUP{y}"
+    qualified_teams = [
+        # Hosts
+        "United States", "Mexico", "Canada",
+        # AFC
+        "Japan", "South Korea", "Saudi Arabia", "Iran", "Australia",
+        "Qatar", "United Arab Emirates", "Iraq",
+        # CAF
+        "Morocco", "Senegal", "Egypt", "Algeria", "Nigeria",
+        "Cameroon", "Ghana", "Ivory Coast", "Tunisia",
+        # CONCACAF
+        "Costa Rica", "Panama", "Jamaica", "Honduras",
+        # CONMEBOL
+        "Argentina", "Brazil", "Uruguay", "Colombia", "Ecuador",
+        "Peru", "Chile", "Paraguay",
+        # OFC
+        "New Zealand",
+        # UEFA
+        "France", "Spain", "England", "Germany", "Portugal",
+        "Netherlands", "Italy", "Belgium", "Croatia", "Denmark",
+        "Switzerland", "Austria", "Serbia", "Ukraine", "Turkey",
+        "Sweden",
+    ]
 
-    return None
-
-
-def _is_final_tournament(edition_key):
-    return "Q" not in edition_key
-
-
-def _detect_groups_final(edition_df):
-    """Detect groups in final tournaments using first-3-opponents heuristic.
-
-    In 4-team groups with single round-robin, each team plays exactly 3
-    group matches. The first 3 unique opponents form the group.
-    """
-    matches_by_date = edition_df.sort_values("date")
-    team_opponents = {}
-
-    for _, row in matches_by_date.iterrows():
-        home, away = row["home_team"], row["away_team"]
-        team_opponents.setdefault(home, []).append(away)
-        team_opponents.setdefault(away, []).append(home)
-
-    raw_groups = {}
-    for team, opponents in team_opponents.items():
-        raw_groups[team] = frozenset([team] + opponents[:3])
-
-    unique_groups = set(raw_groups.values())
-    return [g for g in unique_groups if len(g) == 4]
-
-
-def _detect_groups_qualifier(edition_df):
-    """Detect groups in qualifiers via BFS connected components.
-
-    Qualifiers use double round-robin: teams in the same group play
-    each other home & away. Skip CONMEBOL single-league (>=10 teams).
-    """
-    adjacency = {}
-    for _, row in edition_df.iterrows():
-        home, away = row["home_team"], row["away_team"]
-        adjacency.setdefault(home, set()).add(away)
-        adjacency.setdefault(away, set()).add(home)
-
-    all_teams = set(adjacency.keys())
-    visited = set()
-    components = []
-
-    for team in all_teams:
-        if team in visited:
-            continue
-        component = set()
-        queue = [team]
-        while queue:
-            current = queue.pop(0)
-            if current in component:
-                continue
-            component.add(current)
-            visited.add(current)
-            for neighbor in adjacency.get(current, set()):
-                if neighbor not in component:
-                    queue.append(neighbor)
-        components.append(component)
-
-    return [frozenset(c) for c in components if len(c) < 10]
-
-
-def _calculate_standings(group_teams, prev_matches_df):
-    """Calculate group standings from completed matches.
-
-    Returns dict: team -> {pts, gd, gf, mp}
-    """
-    standings = {t: {"pts": 0, "gd": 0, "gf": 0, "mp": 0} for t in group_teams}
-
-    for _, row in prev_matches_df.iterrows():
-        home, away = row["home_team"], row["away_team"]
-        if home not in group_teams or away not in group_teams:
-            continue
-        hs, aws = row["home_score"], row["away_score"]
-        if pd.isna(hs) or pd.isna(aws):
-            continue
-        hs, aws = int(hs), int(aws)
-
-        standings[home]["mp"] += 1
-        standings[away]["mp"] += 1
-        standings[home]["gf"] += hs
-        standings[away]["gf"] += aws
-        standings[home]["gd"] += hs - aws
-        standings[away]["gd"] += aws - hs
-
-        if hs > aws:
-            standings[home]["pts"] += 3
-        elif hs < aws:
-            standings[away]["pts"] += 3
+    valid_teams = []
+    for team in qualified_teams:
+        if team in team_encoder.classes_:
+            valid_teams.append(team)
         else:
-            standings[home]["pts"] += 1
-            standings[away]["pts"] += 1
+            print(f"Warning: {team} not found in team encoder, skipping")
 
-    return standings
+    print(f"Valid teams for WC 2026: {len(valid_teams)}/{len(qualified_teams)}")
 
+    if len(valid_teams) < 32:
+        print("Not enough valid teams to create meaningful schedule")
+        return None
 
-def _check_status(standings, team, current_opponent, remaining_matches, num_advancing):
-    """Determine if a team is already qualified or must win to survive.
+    set_seed(42)
 
-    is_already_qualified: fewer than num_advancing teams can surpass
-        the team's CURRENT points with their max possible.
-    must_win_to_survive: a draw mathematically eliminates but a win
-        keeps the team alive (and not already qualified).
+    teams = valid_teams[:48] if len(valid_teams) >= 48 else valid_teams
+    random.shuffle(teams)
 
-    current_opponent: the other team in this match, so its max possible
-        includes the 3 points it could earn from this fixture.
-    """
-    if team not in standings:
-        return 0, 0
+    groups = []
+    for i in range(0, min(48, len(teams)), 4):
+        if i + 3 < len(teams):
+            groups.append(teams[i : i + 4])
 
-    team_pts = standings[team]["pts"]
-    n_remaining = sum(1 for h, a in remaining_matches if team in (h, a))
+    matches = []
+    match_date = pd.to_datetime("2026-06-11")
 
-    # Max possible points for every other team.
-    # remaining_matches only contains future matches (li > mi), so we add 1
-    # to the opponent's remaining count to account for this match.
-    other_max = {}
-    for t, s in standings.items():
-        if t == team:
-            continue
-        r = sum(1 for h, a in remaining_matches if t in (h, a))
-        if t == current_opponent:
-            r += 1  # this match is not in remaining_matches
-        other_max[t] = s["pts"] + 3 * r
+    for group_idx, group in enumerate(groups):
+        for i in range(4):
+            for j in range(i + 1, 4):
+                if (i + j) % 2 == 0:
+                    home_team, away_team = group[i], group[j]
+                else:
+                    home_team, away_team = group[j], group[i]
 
-    if not other_max:
-        return 1, 0
-
-    sorted_max = sorted(other_max.values(), reverse=True)
-    cutoff_idx = min(num_advancing - 1, len(sorted_max) - 1)
-    cutoff = sorted_max[cutoff_idx]
-    is_qualified = 1 if team_pts > cutoff else 0
-
-    if is_qualified:
-        return 1, 0
-
-    # Must win: max with draw < cutoff_pts, max with win >= cutoff_pts.
-    # Only check when there are remaining matches to play.
-    if n_remaining == 0:
-        return 0, 0
-
-    # n_remaining doesn't include this match, so total remaining after this
-    # (excluding this match) = n_remaining (all are future).
-    after = n_remaining
-    max_with_draw = team_pts + 1 + 3 * after
-    max_with_win = team_pts + 3 + 3 * after
-
-    # cutoff from max-possible standings (same logic as qualification check)
-    cutoff_pts = sorted_max[cutoff_idx]
-
-    must_win = 1 if (max_with_draw < cutoff_pts and max_with_win >= cutoff_pts) else 0
-    return 0, must_win
-
-
-def calculate_group_context(df):
-    """Add fighting-spirit features: group_round, is_already_qualified, must_win_to_survive.
-
-    Two-pass approach:
-      1. Identify editions and detect groups per edition (no look-ahead)
-      2. Process each group chronologically, computing standings from
-         completed matches only, then determining status before each match.
-
-    Supports: WC finals, Euro, Copa America, AFCON, Asian Cup, Gold Cup,
-             WC qualifiers, and continental qualifiers (except CONMEBOL).
-    """
-    df = df.copy()
-
-    # Default columns
-    df["group_round"] = 1
-    df["is_already_qualified_home"] = 0
-    df["is_already_qualified_away"] = 0
-    df["must_win_to_survive_home"] = 0
-    df["must_win_to_survive_away"] = 0
-
-    # ---- PASS 1: Detect groups per edition ----
-    edition_masks = {}
-    for idx, row in df.iterrows():
-        key = _get_edition_key(row["tournament"], row["date"].year)
-        if key is None:
-            continue
-        if key not in edition_masks:
-            edition_masks[key] = []
-        edition_masks[key].append(idx)
-
-    edition_groups = {}
-    for key, indices in edition_masks.items():
-        edition_df = df.loc[indices]
-        groups = _detect_groups_final(edition_df) if _is_final_tournament(key) else _detect_groups_qualifier(edition_df)
-        if groups:
-            edition_groups[key] = groups
-
-    if not edition_groups:
-        print("Group context: No groups detected, all features set to defaults")
-        return df
-
-    total_groups = sum(len(g) for g in edition_groups.values())
-    print(f"Group context: Detected {total_groups} groups across {len(edition_groups)} editions")
-
-    # ---- PASS 2: Process each group chronologically ----
-    processed = 0
-
-    for edition_key, groups in edition_groups.items():
-        edition_indices = sorted(edition_masks[edition_key])
-        num_advancing = 2 if _is_final_tournament(edition_key) else 1
-
-        for group_teams in groups:
-            group_set = set(group_teams)
-            played = []  # completed matches within this group
-            match_counts = {t: 0 for t in group_set}
-
-            for mi in edition_indices:
-                row = df.loc[mi]
-                home, away = row["home_team"], row["away_team"]
-
-                if home not in group_set or away not in group_set:
-                    continue
-
-                match_counts[home] += 1
-                match_counts[away] += 1
-                df.at[mi, "group_round"] = match_counts[home]  # same for both teams
-
-                # Remaining matches AFTER this one (future only)
-                remaining = [
-                    (df.loc[li]["home_team"], df.loc[li]["away_team"])
-                    for li in edition_indices
-                    if li > mi and df.loc[li]["home_team"] in group_set and df.loc[li]["away_team"] in group_set
-                ]
-
-                standings = _calculate_standings(group_set, pd.DataFrame(played) if played else pd.DataFrame())
-
-                qh, mwh = _check_status(standings, home, away, remaining, num_advancing)
-                qa, mwa = _check_status(standings, away, home, remaining, num_advancing)
-
-                df.at[mi, "is_already_qualified_home"] = qh
-                df.at[mi, "must_win_to_survive_home"] = mwh
-                df.at[mi, "is_already_qualified_away"] = qa
-                df.at[mi, "must_win_to_survive_away"] = mwa
-
-                played.append({
-                    "home_team": home, "away_team": away,
-                    "home_score": row["home_score"], "away_score": row["away_score"],
+                matches.append({
+                    "date": match_date,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "tournament": "FIFA World Cup",
+                    "neutral": True,
                 })
-                processed += 1
 
-    print(f"Group context: Processed {processed} group matches")
-    return df
+        match_date += pd.Timedelta(days=1)
 
-
-def engineer_features(df):
-    """
-    Engineer all features for the model.
-    """
-    print("Engineering features...")
-    df = df.copy()
-
-    # Days since first match (temporal feature)
-    df["days_since_first"] = (df["date"] - df["date"].min()).dt.days
-
-    # Year and month
-    df["year"] = df["date"].dt.year
-    df["month"] = df["date"].dt.month
-
-    # Neutral venue
-    df["is_neutral"] = df["neutral"].astype(int)
-
-    # Elo-based features
-    df["elo_diff"] = df["elo_diff"]
-    df["abs_elo_diff"] = abs(df["elo_diff"])
-    df["elo_quality"] = (df["home_elo"] + df["away_elo"]) / 2 / ELO_INITIAL  # Match quality
-
-    # Form-based features
-    df["form_advantage"] = df["home_form"] - df["away_form"]
-    df["form_quality"] = (df["home_form"] + df["away_form"]) / 2
-
-    # Goal scoring difference
-    df["gs_advantage"] = df["home_goals_scored_avg"] - df["away_goals_scored_avg"]
-    df["gc_advantage"] = df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]
-
-    # Win rate advantage
-    df["wr_advantage"] = df["home_win_rate"] - df["away_win_rate"]
-
-    # H2H features
-    df["h2h_home_advantage"] = np.where(
-        df["h2h_count"] > 0,
-        (df["h2h_home_wins"] - df["h2h_away_wins"]) / df["h2h_count"].clip(lower=1),
-        0,
-    )
-    df["has_h2h"] = (df["h2h_count"] > 0).astype(int)
-
-    # Elo-similarity advantage features
-    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
-    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
-    df["sim_dr_quality"] = (df["home_sim_draw_rate"] + df["away_sim_draw_rate"]) / 2
-
-    # Tournament importance
-    df["tournament_importance"] = df["tournament"].apply(_get_tournament_importance)
-
-    # Target variable: 0 = away win, 1 = draw, 2 = home win
-    df["result"] = np.where(
-        df["home_score"] > df["away_score"], 2,
-        np.where(df["home_score"] == df["away_score"], 1, 0)
-    )
-
-    return df
-
-
-def _get_tournament_importance(tournament):
-    """Rate tournament importance 0-3."""
-    t = str(tournament).lower()
-    if "fifa world cup" in t and "qualification" not in t:
-        return 3
-    elif "fifa world cup qualification" in t:
-        return 2
-    elif any(x in t for x in ["uefa euro", "copa américa", "african cup", "asian cup", "gold cup"]):
-        return 2
-    elif any(x in t for x in ["nations league", "confederations"]):
-        return 1
-    elif "friendly" in t:
-        return 0
-    else:
-        return 1
-
-
+    schedule_df = pd.DataFrame(matches)
+    print(f"Created schedule with {len(schedule_df)} group matches across {len(groups)} groups")
+    return schedule_df
 
 
 def preprocess_pipeline():
@@ -820,16 +541,13 @@ def preprocess_pipeline():
     # Step 4: Calculate H2H features
     df = calculate_h2h_features(df)
 
-    # Step 4.5: Calculate group context (fighting spirit features)
-    df = calculate_group_context(df)
-
-    # Step 4.6: Calculate Elo-similarity features
+    # Step 5: Calculate Elo-similarity features
     df = calculate_elo_similarity_features(df, elo_delta=125)
 
-    # Step 5: Engineer features
-    df = engineer_features(df)
+    # Step 6: Engineer features
+    df = feature_engineering_v2(df)
 
-    # Step 6: Fit and save team encoder
+    # Step 7: Fit and save team encoder
     all_teams = pd.concat([df["home_team"], df["away_team"]]).unique()
     team_encoder = LabelEncoder()
     team_encoder.fit(all_teams)
@@ -841,7 +559,7 @@ def preprocess_pipeline():
     with open(TEAM_ENCODER_PATH, "wb") as f:
         pickle.dump(team_encoder, f)
 
-    # Step 7: Save processed data
+    # Step 8: Save processed data
     df.to_csv(PROCESSED_DATA_PATH, index=False)
 
     home_wins = (df["result"] == 2).sum()

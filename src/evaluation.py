@@ -40,24 +40,25 @@ def ece(y_true, probs, n_bins=10):
     return float(ece_sum)
 
 
-def compute_metrics(y_true, probs):
-    """Compute all standard metrics from labels and predicted probabilities.
+def compute_basic_metrics(y_true, preds):
+    """Hard metrics from class predictions only — no probs needed.
 
-    Args:
-        y_true: (N,) integer labels (0=away, 1=draw, 2=home)
-        probs: (N, 3) predicted probabilities
-
-    Returns:
-        dict with keys: acc, f1_macro, brier, logloss, ece,
-                        mean_away_prob, mean_draw_prob, mean_home_prob,
-                        mean_confidence, num_samples
+    Suitable for train-epoch progress logging where calibration metrics
+    (Brier/LogLoss/ECE) are meaningless and wasteful to compute.
     """
-    preds = np.argmax(probs, axis=1)
-    mean_probs = probs.mean(axis=0)
-
     return {
         "acc": float(accuracy_score(y_true, preds)),
         "f1_macro": float(f1_score(y_true, preds, average="macro")),
+    }
+
+
+def compute_prob_metrics(y_true, probs):
+    """Soft metrics that require full probability distributions.
+
+    Suitable for val/test/backtest where calibration quality matters.
+    """
+    mean_probs = probs.mean(axis=0)
+    return {
         "brier": brier_score(y_true, probs),
         "logloss": log_loss_score(y_true, probs),
         "ece": ece(y_true, probs),
@@ -65,8 +66,16 @@ def compute_metrics(y_true, probs):
         "mean_draw_prob": float(mean_probs[1]),
         "mean_home_prob": float(mean_probs[2]),
         "mean_confidence": float(np.max(probs, axis=1).mean()),
-        "num_samples": len(y_true),
     }
+
+
+def compute_metrics(y_true, probs):
+    """Full metrics: basic + probability + sample count."""
+    preds = np.argmax(probs, axis=1)
+    metrics = compute_basic_metrics(y_true, preds)
+    metrics.update(compute_prob_metrics(y_true, probs))
+    metrics["num_samples"] = len(y_true)
+    return metrics
 
 
 def classification_report_dict(y_true, y_pred, target_names=None):
