@@ -4,6 +4,8 @@ Reusable backtest runner: train → validate → test with optional temperature 
 Ports the training loop from train_one_variant (backtest_positional_strength.py)
 into a configurable, model-agnostic function.
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from dataclasses import dataclass
 import torch
@@ -13,11 +15,11 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import pandas as pd
 
-from config import set_seed
-from model import create_model, MultiTaskLoss
+from utils import set_seed
+from modeling.architecture import create_model, MultiTaskLoss
 from evaluation import compute_metrics, print_backtest_report
 from calibration import TemperatureScaler
-from engine import Trainer
+from modeling.trainer import Trainer
 
 
 @dataclass
@@ -205,9 +207,8 @@ if __name__ == "__main__":
     import pandas as pd
     import pickle
     from config import PROCESSED_DATA_PATH, TEAM_ENCODER_PATH
-    from features import FEATURE_COLS, feature_engineering_v2
-    from preprocessing import split_data_improved, prepare_enhanced_data
-    from model import create_model
+    from features.builder import FEATURE_COLS, feature_engineering_v2, split_data_improved, prepare_enhanced_data
+    from modeling.architecture import create_model
 
     print("=" * 60)
     print("WC 2022 Backtest")

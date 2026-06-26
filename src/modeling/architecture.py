@@ -160,7 +160,7 @@ class TeamAttentionNet(nn.Module):
         else:
             home_emb = self.team_embedding(home_team_ids) + self.home_indicator
             away_emb = self.team_embedding(away_team_ids) + self.away_indicator
-            
+
         home_strength = self.team_strength_bias(home_team_ids)
         away_strength = self.team_strength_bias(away_team_ids)
 

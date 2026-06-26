@@ -7,3 +7,4 @@ f903c5e	26 feat (no positional): baseline after removing positional	26	GaussRank
 120f54a	22 feat: remove away_elo, keep home_elo only	22	StandardScaler	0.5312	0.4331	0.5777	1.0061	0.1189	40.6	7.8	51.6	32.8	23.4	43.8	—	—
 31bbedc	22 feat: 21-base + group_round (1-10 int, knockout data sparse: round≥2 only 19% of matches)	22	StandardScaler	0.4844	0.4087	0.6557	1.1530	0.1399	42.2	14.1	43.8	32.8	23.4	43.8	—	—
 ddc718d	21 feat: Brier loss (vs CE baseline)	21	StandardScaler	0.4844	0.3636	0.6353	1.0819	0.1287	35.9	4.7	59.4	32.8	23.4	43.8	52	1.0
+7877b89	21 feat: remove 3 goal + 2 H2H features, sim_dr_quality=min() (restructured src/)	21	StandardScaler	0.5625	0.5321	0.5675	1.0084	0.0733	43.8	21.9	34.4	32.8	23.4	43.8	—	—

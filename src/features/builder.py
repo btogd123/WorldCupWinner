@@ -1,21 +1,103 @@
 """
-Data preparation: StandardScaler + team encoding → tensor tuples.
+Feature engineering for match prediction.
+Pure functions, no PyTorch dependency.
 
-Depends on features.FEATURE_COLS for the canonical feature list.
+Canonical 21-feature list (5 groups) — single source of truth for all scripts.
 """
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from features import FEATURE_COLS
-
+FEATURE_COLS = [
+    # Elo-based (4)
+    "elo_diff",
+    "elo_quality",
+    "elo_ratio",
+    "abs_elo_diff",
+    # Form-based (3)
+    "form_advantage",
+    "form_quality",
+    "wr_advantage",
+    # Elo-similarity (3)
+    "sim_wr_advantage",
+    "sim_gs_advantage",
+    "sim_dr_quality",
+    # Draw-specific (6) — Hvattum 2017
+    "draw_rate_home",
+    "draw_rate_away",
+    "both_draw_prone",
+    "defensive_similarity",
+    "strength_parity",
+    "low_scoring_tendency",
+    # Context (5)
+    "is_neutral",
+    "is_wc",
+    "is_wcq",
+    "is_continental",
+    "is_friendly",
+]
 
 # Columns that are binary (0/1) and should not be scaled
 BINARY_FEATURE_COLS = {
     "is_neutral", "is_wc", "is_wcq", "is_continental", "is_friendly",
-    "has_h2h", "low_scoring_tendency",
+    "low_scoring_tendency",
 }
+
+
+def feature_engineering_v2(df):
+    """Enhanced feature engineering."""
+    print("Engineering enhanced features...")
+    df = df.copy()
+
+    df["elo_diff"] = df["elo_diff"]
+    df["elo_quality"] = (df["home_elo"] + df["away_elo"]) / 2
+    df["elo_ratio"] = df["home_elo"] / df["away_elo"]
+    df["abs_elo_diff"] = abs(df["elo_diff"])
+
+    # Form-based features
+    df["form_advantage"] = df["home_form"] - df["away_form"]
+    df["form_quality"] = (df["home_form"] + df["away_form"]) / 2
+    df["wr_advantage"] = df["home_win_rate"] - df["away_win_rate"]
+
+    # Draw-specific features (TheDrawCode / Hvattum 2017 original formulas)
+    df["draw_rate_home"] = df["home_draw_rate"]
+    df["draw_rate_away"] = df["away_draw_rate"]
+    df["both_draw_prone"] = np.minimum(df["home_draw_rate"], df["away_draw_rate"])
+    df["defensive_similarity"] = 1.0 / (1.0 + abs(df["home_goals_conceded_avg"] - df["away_goals_conceded_avg"]))
+    df["strength_parity"] = 1.0 / (1.0 + abs(df["elo_diff"]) / 100.0)
+    df["low_scoring_tendency"] = (
+        (df["home_goals_scored_avg"] + df["home_goals_conceded_avg"] < 2.5)
+        & (df["away_goals_scored_avg"] + df["away_goals_conceded_avg"] < 2.5)
+    ).astype(float)
+
+    # Elo-similarity advantage features
+    df["sim_wr_advantage"] = df["home_sim_win_rate"] - df["away_sim_win_rate"]
+    df["sim_gs_advantage"] = df["home_sim_gs"] - df["away_sim_gs"]
+    df["sim_dr_quality"] = np.minimum(df["home_sim_draw_rate"], df["away_sim_draw_rate"])
+
+    # Tournament type encoding
+    df["is_wc"] = df["tournament"].str.contains("FIFA World Cup", na=False).astype(int)
+    df["is_wcq"] = df["tournament"].str.contains("qualification", na=False).astype(int)
+    df["is_friendly"] = df["tournament"].str.contains("Friendly", na=False).astype(int)
+    df["is_continental"] = (
+        df["tournament"].str.contains(
+            "UEFA Euro|Copa Am|African Cup|Asian Cup|Gold Cup|Nations League",
+            na=False,
+        )
+    ).astype(int)
+
+    # Neutral venue
+    df["is_neutral"] = df["neutral"].astype(int)
+
+    # Target
+    df["result"] = np.where(
+        df["home_score"] > df["away_score"],
+        2,
+        np.where(df["home_score"] == df["away_score"], 1, 0),
+    )
+
+    return df
 
 
 def prepare_enhanced_data(df, scaler, team_encoder, fit_scaler=False, feature_cols=None):

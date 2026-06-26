@@ -1,6 +1,9 @@
 """
 Improved training pipeline with better features and model architecture.
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -21,14 +24,13 @@ from config import (
     LEARNING_RATE,
     RESULTS_DIR,
     IMPORTANT_TOURNAMENTS,
-    set_seed,
 )
-from model import create_model, MultiTaskLoss
+from utils import set_seed
+from modeling.architecture import create_model, MultiTaskLoss
 from calibration import calibrate_and_evaluate
-from features import FEATURE_COLS, feature_engineering_v2
-from preprocessing import prepare_enhanced_data, split_data_improved
+from features.builder import FEATURE_COLS, feature_engineering_v2, prepare_enhanced_data, split_data_improved
 from evaluation import compute_metrics
-from engine import Trainer
+from modeling.trainer import Trainer
 
 
 def load_and_prepare_data():

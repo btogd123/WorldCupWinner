@@ -57,6 +57,7 @@ def compute_prob_metrics(y_true, probs):
 
     Suitable for val/test/backtest where calibration quality matters.
     """
+    probs = np.array(probs)
     mean_probs = probs.mean(axis=0)
     return {
         "brier": brier_score(y_true, probs),

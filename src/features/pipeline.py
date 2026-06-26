@@ -22,7 +22,7 @@ from config import (
     RECENT_FORM_WINDOW,
     IMPORTANT_TOURNAMENTS,
 )
-from features import feature_engineering_v2
+from features.builder import feature_engineering_v2
 
 
 def load_raw_data(path=None):
@@ -441,7 +441,7 @@ def create_wc2026_schedule(team_encoder):
     WC 2026 has 48 teams in groups of 4 (12 groups).
     Top 2 from each group + 8 best 3rd place advance.
     """
-    from config import set_seed
+    from utils import set_seed
 
     qualified_teams = [
         # Hosts

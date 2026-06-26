@@ -9,7 +9,7 @@ Build a deep learning model to predict 2026 FIFA World Cup match winners. The mo
 - **Current best model**: `TeamAttentionNet` (PyTorch NN with Attention)
 - **Performance**: 58.8% accuracy on 1,021 World Cup qualifiers (53.6% F1), 53.9% overall test
 - **Production config**: Config C — draw-specific features (6) + neutral venue gating; no `group_round`
-- **Training seed**: 99 (reproducible — set in `train.py`)
+- **Training seed**: 99 (reproducible — set in `scripts/run_train.py`)
 - **Top Elo teams**: Spain (2235), Argentina (2203), France (2148), England (2103), Brazil (2087)
 - **Pi-Rating experiment**: Tested and abandoned — regressed vs Elo baseline (WCQ 59.2% vs 62.0%)
 - **Draw-specific features**: Implemented (Hvattum 2017) — 6 features from literature review
@@ -19,8 +19,8 @@ Build a deep learning model to predict 2026 FIFA World Cup match winners. The mo
 ```
 Python: uv (Python 3.13) — just run `uv sync` to set up
 GPU: CUDA available (downgrade torch to CPU if no GPU)
-Working directory: D:/WorldCupWinner
-PYTHONPATH MUST include D:/WorldCupWinner for imports to work
+Working directory: /home/liujichang/DeepLearningProjects/WorldCupWinner
+Scripts auto-add src/ to path. For direct imports, use PYTHONPATH=src.
 ```
 
 ## Project Structure
@@ -54,12 +54,26 @@ D:/WorldCupWinner/
 └── src/
     ├── __init__.py                    ← Package marker
     ├── config.py                      ← All paths, hyperparameters, constants
-    ├── data_processor.py              ← Data pipeline: load → Elo → form → H2H → save
-    ├── model.py                       ← NN architecture (TeamAttentionNet + MultiTaskLoss)
-    ├── train.py              ← Training script for NN
-    ├── predict_wc2026.py              ← Predict WC 2026 group matches
-    ├── betting.py                     ← EV analysis + Kelly criterion
-    └── generate_report.py            ← Final report generator
+    ├── utils.py                       ← set_seed() utility
+    ├── calibration.py                 ← Temperature scaling calibration
+    ├── evaluation.py                  ← Metrics computation
+    ├── features/
+    │   ├── __init__.py                ← Re-exports from builder + pipeline
+    │   ├── builder.py                 ← FEATURE_COLS + feature_engineering + data splitting
+    │   └── pipeline.py                ← Data pipeline: load → Elo → form → H2H → save
+    ├── modeling/
+    │   ├── __init__.py                ← Re-exports architecture + trainer
+    │   ├── architecture.py            ← NN architecture (TeamAttentionNet + MultiTaskLoss)
+    │   └── trainer.py                 ← Trainer class (training loop + early stopping)
+    ├── inference/
+    │   ├── __init__.py                ← Re-exports predictor functions
+    │   └── predictor.py               ← Load model, predict matches, simulate tournament
+    └── scripts/
+        ├── run_preprocessing.py       ← Run full preprocessing pipeline
+        ├── run_train.py               ← Training script for NN
+        ├── run_backtest.py            ← WC 2022 backtest (train → validate → test)
+        ├── run_predict.py             ← Predict WC 2026 group matches
+        └── run_betting.py             ← EV analysis + Kelly criterion
 ```
 
 ## How to Run Each Script
@@ -68,17 +82,23 @@ D:/WorldCupWinner/
 # Activate environment
 uv sync
 
+# Run full preprocessing pipeline
+PYTHONPATH=src uv run python src/scripts/run_preprocessing.py
+
 # Train the model (takes ~10min on GPU)
-PYTHONPATH=D:/WorldCupWinner uv run python src/train.py
+PYTHONPATH=src uv run python src/scripts/run_train.py
+
+# Run WC 2022 backtest
+PYTHONPATH=src uv run python src/scripts/run_backtest.py
 
 # Predict all WC 2026 matches
-PYTHONPATH=D:/WorldCupWinner PYTHONIOENCODING=utf-8 uv run python src/predict_wc2026.py
+PYTHONPATH=src uv run python src/scripts/run_predict.py
 
 # Betting analysis (single match)
-PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --match "France" "Brazil" 2.50 3.20 2.80
+PYTHONPATH=src uv run python src/scripts/run_betting.py --match "France" "Brazil" 2.50 3.20 2.80
 
 # Betting analysis (batch, needs odds.csv)
-PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --all
+PYTHONPATH=src uv run python src/scripts/run_betting.py --all
 ```
 
 **Important**: Always use `PYTHONIOENCODING=utf-8` on Windows. The GBK console encoding causes Unicode errors with special characters.
@@ -90,7 +110,7 @@ PYTHONPATH=D:/WorldCupWinner uv run python src/betting.py --all
 Inputs:
   ├── Home Team ID → Embedding(64-dim) + Home Indicator (gated by is_neutral)
   ├── Away Team ID → Embedding(64-dim) + Away Indicator (gated by is_neutral)
-  └── Match Features (26-dim) → Encoder(128-dim)
+  └── Match Features (21-dim) → Encoder(128-dim)
 
 Team Interaction: Multi-Head Self-Attention (4 heads)
   → Home + Away embeddings attend to each other
@@ -102,13 +122,11 @@ Outputs:
   └── Goal Prediction Head: 128→64→2 (Home goals, Away goals, MSE auxiliary)
 ```
 
-### Features (26-dimensional)
+### Features (21-dimensional)
 | Category | Features | Source |
 |----------|----------|--------|
 | Elo (4) | elo_diff, elo_quality, elo_ratio, abs_elo_diff | Dynamic Elo calculation |
 | Form (3) | form_advantage, form_quality, wr_advantage | 10-match sliding window |
-| Goals (3) | gs_advantage, gc_advantage, goal_diff_advantage | Rolling averages |
-| H2H (2) | h2h_dominance, has_h2h | Historical matchup lookup |
 | Elo-Sim (3) | sim_wr_advantage, sim_gs_advantage, sim_dr_quality | Elo-similarity match lookups |
 | Draw (6) | draw_rate_home, draw_rate_away, both_draw_prone, strength_parity, defensive_similarity, low_scoring_tendency | Hvattum 2017 — Config C |
 | Context (5) | is_neutral, is_wc, is_wcq, is_continental, is_friendly | Match metadata |
@@ -151,7 +169,7 @@ The `home_elo` column in processed_matches.csv is the Elo BEFORE that match. The
 - Result: 43% accuracy
 
 ### Attempt 2: Improved NN (CURRENT — Config C)
-- Files: `src/model.py`, `src/train.py`
+- Files: `src/modeling/architecture.py`, `src/scripts/run_train.py`
 - 27 features, Attention, CrossEntropyLoss, Multi-task, neutral venue gating
 - Draw-specific features (Hvattum 2017), `group_round` removed after ablation showed harm
 - Elo bug fixed
@@ -202,10 +220,10 @@ From `docs/literature_review.md`, ranked by ROI:
 ## Key File Dependencies
 ```
 data/results.csv
-  → src/data_processor.py → data/processed_matches.csv + data/elo_ratings.csv
-    → src/train.py → models/match_predictor.pt (+ scaler, encoder)
-      → src/predict_wc2026.py → results/wc2026_predictions.json
-      → src/betting.py → results/betting_analysis.json
+  → src/features/pipeline.py → data/processed_matches.csv + data/elo_ratings.csv
+    → src/scripts/run_train.py → models/match_predictor.pt (+ scaler, encoder)
+      → src/scripts/run_predict.py → results/wc2026_predictions.json
+      → src/scripts/run_betting.py → results/betting_analysis.json
 ```
 
 ## Git & GitHub

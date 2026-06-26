@@ -2,6 +2,9 @@
 Betting analysis: combine model probabilities with odds to find value bets.
 Kelly criterion for position sizing.
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import pandas as pd
 import numpy as np
 import json
@@ -294,10 +297,10 @@ def quick_check(home_team, away_team, odds_home, odds_draw, odds_away):
     if probs is None:
         # Load model directly
         print(f"Match not in predictions, loading model...")
-        from predict_wc2026 import load_model_and_assets
+        from inference.predictor import load_model_and_assets
         import torch
 
-        model, team_encoder, scaler, feature_cols, device = load_model_and_assets()
+        model, team_encoder, scaler, feature_cols, temperature, device = load_model_and_assets()
 
         elo_df = pd.read_csv("data/elo_ratings.csv")
         elo_dict = dict(zip(elo_df["team"], elo_df["elo_rating"]))
