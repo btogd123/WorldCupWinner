@@ -8,3 +8,8 @@ f903c5e	26 feat (no positional): baseline after removing positional	26	GaussRank
 31bbedc	22 feat: 21-base + group_round (1-10 int, knockout data sparse: round≥2 only 19% of matches)	22	StandardScaler	0.4844	0.4087	0.6557	1.1530	0.1399	42.2	14.1	43.8	32.8	23.4	43.8	—	—
 ddc718d	21 feat: Brier loss (vs CE baseline)	21	StandardScaler	0.4844	0.3636	0.6353	1.0819	0.1287	35.9	4.7	59.4	32.8	23.4	43.8	52	1.0
 b788a7c	21 feat: remove 3 goal + 2 H2H features, sim_dr_quality=min() (restructured src/)	21	StandardScaler	0.5625	0.5321	0.5675	1.0084	0.0733	43.8	21.9	34.4	32.8	23.4	43.8	—	—
+a5d760f	chore: remove dead H2H code from pipeline (same 21-feature model)	21	StandardScaler	0.5625	0.5321	0.5675	1.0084	0.0733	43.8	21.9	34.4	32.8	23.4	43.8	—	—
+886a05b	20 feat: is_neutral gating only, excluded from encoder	20	StandardScaler	0.5156	0.4761	0.6115	1.0658	0.0386	37.5	17.2	45.3	32.8	23.4	43.8	17	1.0
+6dfbae5	chore: fix stale calculate_h2h_features import in features/__init__.py	21	StandardScaler	0.5625	0.5321	0.5675	1.0084	0.0733	43.8	21.9	34.4	32.8	23.4	43.8	—	—
+a53ea8c	21 feat (context proj v1): Linear(4,64) maps tournament flags to team embedding shift — symmetric shift cancels out, degrades	21	StandardScaler	0.5000	0.4335	0.6200	1.1510	0.1779	42.2	9.4	48.4	32.8	23.4	43.8	44	1.0
+35229a0	21 feat (context proj v2): Linear(4,256) maps tournament flags to combined layer shift — better than v1 but still below baseline, overpredicts home	21	StandardScaler	0.5156	0.4421	0.6163	1.0606	0.1240	37.5	10.9	51.6	32.8	23.4	43.8	36	1.0
